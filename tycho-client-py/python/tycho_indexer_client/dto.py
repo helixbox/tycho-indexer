@@ -163,6 +163,7 @@ class BlockChanges(BaseModel):
     new_protocol_components: Dict[str, ProtocolComponent]
     deleted_protocol_components: Dict[str, ProtocolComponent]
     component_balances: Dict[str, TokenBalances]
+    account_balances: Dict[HexBytes, Dict[HexBytes, HexBytes]]
     component_tvl: Dict[str, float]
 
 
@@ -183,6 +184,7 @@ class ResponseAccount(BaseModel):
     title: str
     slots: Dict[HexBytes, HexBytes]
     native_balance: HexBytes = Field(alias="balance")
+    token_balances: Dict[HexBytes, Dict[HexBytes, HexBytes]]
     code: HexBytes
     code_hash: HexBytes
     balance_modify_tx: HexBytes

@@ -1,3 +1,47 @@
+## [0.57.2](https://github.com/propeller-heads/tycho-indexer/compare/0.57.1...0.57.2) (2025-02-14)
+
+## [0.57.1](https://github.com/propeller-heads/tycho-indexer/compare/0.57.0...0.57.1) (2025-02-14)
+
+
+### Bug Fixes
+
+* add arbitrum to the native token migration ([657aa53](https://github.com/propeller-heads/tycho-indexer/commit/657aa53110416f5c54c8fc0ef6bba3293dcacf12))
+* add arbitrum to the native token migration ([#512](https://github.com/propeller-heads/tycho-indexer/issues/512)) ([4a76b38](https://github.com/propeller-heads/tycho-indexer/commit/4a76b3802b1b1c9082f6bfc162d585c8173a2d6e))
+
+## [0.57.0](https://github.com/propeller-heads/tycho-indexer/compare/0.56.5...0.57.0) (2025-02-14)
+
+
+### Features
+
+* add account balances to client-py ([e37f1c6](https://github.com/propeller-heads/tycho-indexer/commit/e37f1c6d96599aaa3e86e91643f4aebb226db575))
+* add account balances to ResponseAccount ([145f270](https://github.com/propeller-heads/tycho-indexer/commit/145f2709aa4f6f27e30cc513553fa80f68c206f4))
+* add account_balances to BlockChanges dto struct ([7cc3e3c](https://github.com/propeller-heads/tycho-indexer/commit/7cc3e3cd66d3d5a5a046e84d373a38e653185c26))
+* add add_account_balances postgres gateway fn ([a38c0ae](https://github.com/propeller-heads/tycho-indexer/commit/a38c0aec5353992aca3b30c50066c0e9fb8351b9))
+* add get_account_balances gateway fn ([83e87ef](https://github.com/propeller-heads/tycho-indexer/commit/83e87eff5bda2a373c64f123a25f5f92d0f917c9))
+* add migration for token_id in account_balance table ([d3acab0](https://github.com/propeller-heads/tycho-indexer/commit/d3acab0c53ead8a902e43eb4db5d3055b602046c))
+* add migration for token_id in account_balance table ([#495](https://github.com/propeller-heads/tycho-indexer/issues/495)) ([fa7e424](https://github.com/propeller-heads/tycho-indexer/commit/fa7e42442bed5cf7b840736fd042008f065317c1))
+* also ensure native token when ensuring chain on start-up ([4cfd6c2](https://github.com/propeller-heads/tycho-indexer/commit/4cfd6c2387ad99ee5b40dd0a630e47b9c62ef72e))
+* fetch account balances on get_contracts ([9ded485](https://github.com/propeller-heads/tycho-indexer/commit/9ded485ad33f5336f7f35f5a24a2ceceebc0d04f))
+* handle account balance changes on reverts ([4cf80bb](https://github.com/propeller-heads/tycho-indexer/commit/4cf80bb4fe56cb8010935398067d2d3da0fb11f7))
+* implement chain -> native token DB id cache ([b35fe77](https://github.com/propeller-heads/tycho-indexer/commit/b35fe77049697215ed3b530474c673aba9f53a52))
+* implement hardcoded chain -> native token map ([531348c](https://github.com/propeller-heads/tycho-indexer/commit/531348c524ad5c265a5dd185c3082a027efa75e0))
+* update existing postgres gateway methods with AccountBalance ([f67fb68](https://github.com/propeller-heads/tycho-indexer/commit/f67fb68fab649dea0ceb260e85c0b5b2568fb54a))
+* Update Tycho Python client Account DTO ([#506](https://github.com/propeller-heads/tycho-indexer/issues/506)) ([a48bb82](https://github.com/propeller-heads/tycho-indexer/commit/a48bb822b5b2a54d71100ab309012a88633097e0))
+
+
+### Bug Fixes
+
+* do not error if ensure chains finds existing chain ([3874ac0](https://github.com/propeller-heads/tycho-indexer/commit/3874ac0528c65ec1437471bcd0b1785cb0fa97d4))
+* filter balances by native token on account balance delta retrieval ([2d4655b](https://github.com/propeller-heads/tycho-indexer/commit/2d4655b3f4ff3b5b6561a639a9768f0cc730a832))
+* only insert ETH native token if DB has 1 chain ([8a38bca](https://github.com/propeller-heads/tycho-indexer/commit/8a38bcabc85ed9b777017980b7adc919aa00f9f3))
+* re-add mistakenly removed dead code clippy skip ([0c2de2b](https://github.com/propeller-heads/tycho-indexer/commit/0c2de2b92dc2cae3e35ae82641abf39eb54518e8))
+* remove balance_float field ([2bb50f4](https://github.com/propeller-heads/tycho-indexer/commit/2bb50f4788b2227cad43c0e0df7f706e81fa40fc))
+* set native token gas correctly ([58f1832](https://github.com/propeller-heads/tycho-indexer/commit/58f1832c584042f25944212b07ce8114ca8686e2))
+* set native token gas value and improve cache name ([d3c3033](https://github.com/propeller-heads/tycho-indexer/commit/d3c303334f8496ac2239c75b44d2a9311af64302))
+* set Starknet native token to ETH ([3f7ec77](https://github.com/propeller-heads/tycho-indexer/commit/3f7ec7733c9604924094d507558513ff5a79dac7))
+* update accout balance table constraints ([7278897](https://github.com/propeller-heads/tycho-indexer/commit/727889779358bae778ee9f8863448439642f7c9f))
+* update get_contract to filter balances by native token ([03dc2e0](https://github.com/propeller-heads/tycho-indexer/commit/03dc2e0fa616dc512dda14c3bb422a3f8f91d077))
+
 ## [0.56.5](https://github.com/propeller-heads/tycho-indexer/compare/0.56.4...0.56.5) (2025-02-12)
 
 

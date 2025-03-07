@@ -50,7 +50,7 @@ pub struct GlobalArgs {
     pub database_url: String,
 
     /// Name of the s3 bucket used to retrieve spkgs
-    #[clap(env = "TYCHO_S3_BUCKET", long, default_value = "repo.propellerheads")]
+    #[clap(env = "TYCHO_S3_BUCKET", long, default_value = "repo.propellerheads-propellerheads")]
     //Default is for backward compatibility but needs to be removed later
     pub s3_bucket: Option<String>,
 
@@ -215,7 +215,7 @@ mod cli_tests {
             global_args: GlobalArgs {
                 endpoint_url: "http://example.com".to_string(),
                 database_url: "my_db".to_string(),
-                s3_bucket: Some("repo.propellerheads".to_string()),
+                s3_bucket: Some("repo.propellerheads-propellerheads".to_string()),
                 server_ip: "0.0.0.0".to_string(),
                 server_port: 4242,
                 server_version_prefix: "v1".to_string(),
@@ -261,7 +261,7 @@ mod cli_tests {
             global_args: GlobalArgs {
                 endpoint_url: "http://example.com".to_string(),
                 database_url: "my_db".to_string(),
-                s3_bucket: Some("repo.propellerheads".to_string()),
+                s3_bucket: Some("repo.propellerheads-propellerheads".to_string()),
                 server_ip: "0.0.0.0".to_string(),
                 server_port: 4242,
                 server_version_prefix: "v1".to_string(),

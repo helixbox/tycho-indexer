@@ -73,6 +73,7 @@ pub trait PendingDeltasBuffer {
         &self,
         ids: Option<&[&str]>,
         protocol_system: &str,
+        min_tvl: Option<f64>,
     ) -> Result<Vec<ProtocolComponent>>;
 
     fn get_block_finality(
@@ -80,6 +81,12 @@ pub trait PendingDeltasBuffer {
         version: BlockNumberOrTimestamp,
         protocol_system: &str,
     ) -> Result<Option<FinalityStatus>>;
+
+    fn search_block(
+        &self,
+        f: &dyn Fn(&BlockAggregatedChanges) -> bool,
+        protocol_system: &str,
+    ) -> Result<Option<BlockAggregatedChanges>>;
 }
 
 impl PendingDeltas {
@@ -374,6 +381,7 @@ impl PendingDeltasBuffer for PendingDeltas {
         &self,
         ids: Option<&[&str]>,
         protocol_system: &str,
+        min_tvl: Option<f64>,
     ) -> Result<Vec<ProtocolComponent>> {
         let requested_ids: Option<HashSet<&str>> = ids.map(|ids| ids.iter().cloned().collect());
         let mut new_components = Vec::new();
@@ -391,16 +399,27 @@ impl PendingDeltasBuffer for PendingDeltas {
         })?;
 
         for entry in guard.get_block_range(None, None)? {
+            let components_tvls = &entry.component_tvl;
+
             new_components.extend(
                 entry
                     .new_protocol_components
-                    .clone()
-                    .into_values()
+                    .values()
                     .filter(|comp| {
-                        requested_ids
+                        let id_matches = requested_ids
                             .as_ref()
-                            .map_or(true, |ids| ids.contains(comp.id.as_str()))
-                    }),
+                            .map_or(true, |ids| ids.contains(comp.id.as_str()));
+
+                        let tvl_matches = min_tvl.as_ref().map_or(true, |tvl| {
+                            components_tvls
+                                .get(&comp.id)
+                                .unwrap_or(&0.0) >=
+                                tvl
+                        });
+
+                        id_matches && tvl_matches
+                    })
+                    .cloned(),
             );
         }
 
@@ -433,6 +452,31 @@ impl PendingDeltasBuffer for PendingDeltas {
 
         Ok(guard.get_finality_status(version))
     }
+
+    fn search_block(
+        &self,
+        f: &dyn Fn(&BlockAggregatedChanges) -> bool,
+        protocol_system: &str,
+    ) -> Result<Option<BlockAggregatedChanges>> {
+        let buffer = self
+            .buffers
+            .get(protocol_system)
+            .ok_or_else(|| {
+                error!("Missing reorg buffer for {}", protocol_system);
+                PendingDeltasError::UnknownExtractor(protocol_system.to_string())
+            })?;
+        let guard = buffer.lock().map_err(|e| {
+            PendingDeltasError::LockError(protocol_system.to_string(), e.to_string())
+        })?;
+
+        for block in guard.get_block_range(None, None)? {
+            if f(block) {
+                return Ok(Some(block.clone()));
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -444,7 +488,7 @@ mod test {
     use crate::{extractor::models::fixtures, testing::block};
 
     use tycho_core::models::{
-        contract::AccountDelta,
+        contract::{AccountBalance, AccountDelta},
         protocol::{ComponentBalance, ProtocolComponentStateDelta},
         Chain, ChangeType,
     };
@@ -456,6 +500,7 @@ mod test {
             "Contract1".to_string(),
             fixtures::slots([(2, 2)]),
             Bytes::from("0x1999"),
+            HashMap::new(),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
             Bytes::from("0x4200"),
@@ -478,7 +523,7 @@ mod test {
                     address.clone(),
                     AccountDelta::new(
                         Chain::Ethereum,
-                        address,
+                        address.clone(),
                         fixtures::optional_slots([(1, 1), (2, 1)]),
                         Some(Bytes::from(1999u32).lpad(32, 0)),
                         None,
@@ -500,26 +545,94 @@ mod test {
             .into_iter()
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
-            [(
-                "component2".to_string(),
-                ProtocolComponent {
-                    id: "component2".to_string(),
-                    protocol_system: "vm_swap".to_string(),
-                    protocol_type_name: "swap".to_string(),
-                    chain: Chain::Ethereum,
-                    tokens: Vec::new(),
-                    contract_addresses: Vec::new(),
-                    static_attributes: HashMap::new(),
-                    change: ChangeType::Creation,
-                    creation_tx: Bytes::new(),
-                    created_at: "2020-01-01T00:00:00".parse().unwrap(),
-                },
-            )]
+            [
+                (
+                    "component2".to_string(),
+                    ProtocolComponent {
+                        id: "component2".to_string(),
+                        protocol_system: "vm_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+                (
+                    "component5".to_string(),
+                    ProtocolComponent {
+                        id: "component5".to_string(),
+                        protocol_system: "vm_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+                (
+                    "component4".to_string(),
+                    ProtocolComponent {
+                        id: "component4".to_string(),
+                        protocol_system: "vm_swap".to_string(),
+                        protocol_type_name: "swap".to_string(),
+                        chain: Chain::Ethereum,
+                        tokens: Vec::new(),
+                        contract_addresses: Vec::new(),
+                        static_attributes: HashMap::new(),
+                        change: ChangeType::Creation,
+                        creation_tx: Bytes::new(),
+                        created_at: "2020-01-01T00:00:00".parse().unwrap(),
+                    },
+                ),
+            ]
             .into_iter()
             .collect::<HashMap<_, _>>(),
             HashMap::new(),
             HashMap::new(),
-            HashMap::new(),
+            [
+                (
+                    address.clone(),
+                    [(
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        AccountBalance {
+                            token: Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap(),
+                            balance: Bytes::from("0x01"),
+                            modify_tx: Bytes::zero(32),
+                            account: address.clone(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                ),
+                (
+                    address.clone(),
+                    [(
+                        Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                        AccountBalance {
+                            token: Bytes::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                                .unwrap(),
+                            balance: Bytes::from("0x02"),
+                            modify_tx: Bytes::zero(32),
+                            account: address,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            [("component2".to_string(), 1.5), ("component3".to_string(), 0.5)]
+                .into_iter()
+                .collect::<HashMap<_, _>>(),
         )
     }
 
@@ -638,6 +751,7 @@ mod test {
             .into_iter()
             .collect(),
             HashMap::new(),
+            HashMap::new(),
         )
     }
 
@@ -720,6 +834,7 @@ mod test {
             "Contract1".to_string(),
             fixtures::slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000007cf"),
+            HashMap::new(),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0xbabe"),
             Bytes::from("0x4200"),
@@ -733,6 +848,7 @@ mod test {
             address1.clone().to_string(),
             fixtures::slots([(1, 1), (2, 1)]),
             Bytes::from("0x00000000000000000000000000000000000000000000000000000000000000c8"),
+            HashMap::new(),
             Bytes::from("0x0c0c0c"),
             Bytes::from("0x58ca1e123f83094287ae82a842f4f49e064d6f2fa946a2130335ff131ebd010b"),
             Bytes::from("0x00"),
@@ -780,6 +896,30 @@ mod test {
                 Bytes::new(),
                 "2020-01-01T00:00:00".parse().unwrap(),
             ),
+            ProtocolComponent::new(
+                "component5",
+                "vm_swap",
+                "swap",
+                Chain::Ethereum,
+                Vec::new(),
+                Vec::new(),
+                HashMap::new(),
+                ChangeType::Creation,
+                Bytes::new(),
+                "2020-01-01T00:00:00".parse().unwrap(),
+            ),
+            ProtocolComponent::new(
+                "component4",
+                "vm_swap",
+                "swap",
+                Chain::Ethereum,
+                Vec::new(),
+                Vec::new(),
+                HashMap::new(),
+                ChangeType::Creation,
+                Bytes::new(),
+                "2020-01-01T00:00:00".parse().unwrap(),
+            ),
         ];
         let buffer = PendingDeltas::new(["vm:extractor", "native:extractor"]);
         buffer
@@ -790,16 +930,23 @@ mod test {
             .unwrap();
 
         let new_components = buffer
-            .get_new_components(Some(&["component3"]), "native:extractor")
+            .get_new_components(Some(&["component3"]), "native:extractor", None)
             .unwrap();
 
         assert_eq!(new_components, vec![exp[0].clone()]);
 
-        let new_components = buffer
-            .get_new_components(None, "vm:extractor")
+        let mut new_components = buffer
+            .get_new_components(None, "vm:extractor", None)
             .unwrap();
 
-        assert_eq!(new_components, vec![exp[1].clone()]);
+        new_components.sort_by_key(|comp| comp.id.clone());
+        assert_eq!(new_components, vec![exp[1].clone(), exp[3].clone(), exp[2].clone()]);
+
+        let new_components_tvl_filtered = buffer
+            .get_new_components(None, "vm:extractor", Some(1.0))
+            .unwrap();
+
+        assert_eq!(new_components_tvl_filtered, vec![exp[1].clone()]);
     }
 
     use rstest::rstest;
@@ -836,5 +983,26 @@ mod test {
                 assert!(finality_status.is_some());
             }
         }
+    }
+
+    #[rstest]
+    // cached block
+    #[case(Bytes::from(1u8).lpad(32, 0), Some(native_block_deltas()))]
+    // missing block
+    #[case(Bytes::from(9u8).lpad(32, 0), None)]
+    fn test_search_block(
+        #[case] block_hash: Bytes,
+        #[case] expected_res: Option<BlockAggregatedChanges>,
+    ) {
+        let buffer = PendingDeltas::new(["native:extractor"]);
+        buffer
+            .insert(Arc::new(native_block_deltas()))
+            .unwrap();
+
+        let res = buffer
+            .search_block(&|b| b.block.hash == block_hash, "native:extractor")
+            .unwrap();
+
+        assert_eq!(res, expected_res);
     }
 }

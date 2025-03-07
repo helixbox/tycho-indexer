@@ -1,14 +1,21 @@
 //! This module contains Tycho RPC implementation
 #![allow(deprecated)]
-use std::{collections::HashSet, sync::Arc};
-
 use actix_web::{web, HttpResponse, ResponseError};
 use anyhow::Error;
 use chrono::{Duration, Utc};
 use diesel_async::pooled_connection::deadpool;
+use metrics::counter;
 use reqwest::StatusCode;
+use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
+
+use tycho_core::{
+    dto::{self, PaginationResponse},
+    models::{blockchain::BlockAggregatedChanges, Address, Chain, PaginationParams},
+    storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
+    Bytes,
+};
 
 use crate::{
     extractor::reorg_buffer::{BlockNumberOrTimestamp, FinalityStatus},
@@ -16,13 +23,6 @@ use crate::{
         cache::RpcCache,
         deltas_buffer::{PendingDeltasBuffer, PendingDeltasError},
     },
-};
-
-use tycho_core::{
-    dto::{self, PaginationResponse},
-    models::{Address, Chain, PaginationParams},
-    storage::{BlockIdentifier, BlockOrTimestamp, Gateway, StorageError, Version, VersionKind},
-    Bytes,
 };
 
 #[derive(Error, Debug)]
@@ -235,6 +235,37 @@ where
             BlockOrTimestamp::Block(BlockIdentifier::Number((_, no))) => {
                 BlockNumberOrTimestamp::Number(*no as u64)
             }
+            BlockOrTimestamp::Block(BlockIdentifier::Hash(hash)) => {
+                let block_number = if let Some(block_number) = self
+                    .pending_deltas
+                    .as_ref()
+                    .and_then(|pending| {
+                        pending
+                            .search_block(
+                                &|b: &BlockAggregatedChanges| &b.block.hash == hash,
+                                protocol_system,
+                            )
+                            .ok()
+                    })
+                    .and_then(|block| block.map(|b| b.block.number))
+                {
+                    Some(block_number)
+                } else {
+                    self.db_gateway
+                        .get_block(&BlockIdentifier::Hash(hash.clone()))
+                        .await
+                        .ok()
+                        .map(|block| block.number)
+                }
+                .ok_or_else(|| {
+                    RpcError::Storage(StorageError::NotFound(
+                        "Version".to_string(),
+                        format!("{:?}", request_version),
+                    ))
+                })?;
+
+                BlockNumberOrTimestamp::Number(block_number)
+            }
             BlockOrTimestamp::Timestamp(ts) => BlockNumberOrTimestamp::Timestamp(*ts),
             BlockOrTimestamp::Block(block_id) => BlockNumberOrTimestamp::Number(
                 self.db_gateway
@@ -423,6 +454,39 @@ where
     }
 
     #[instrument(skip(self, request))]
+    async fn get_protocol_systems(
+        &self,
+        request: &dto::ProtocolSystemsRequestBody,
+    ) -> Result<dto::ProtocolSystemsRequestResponse, RpcError> {
+        info!(?request, "Getting protocol systems.");
+        let chain = request.chain.into();
+        let pagination_params: PaginationParams = (&request.pagination).into();
+        match self
+            .db_gateway
+            .get_protocol_systems(&chain, Some(&pagination_params))
+            .await
+        {
+            Ok(protocol_systems) => Ok(dto::ProtocolSystemsRequestResponse::new(
+                protocol_systems
+                    .entity
+                    .into_iter()
+                    .collect(),
+                PaginationResponse::new(
+                    request.pagination.page,
+                    request.pagination.page_size,
+                    protocol_systems
+                        .total
+                        .unwrap_or_default(),
+                ),
+            )),
+            Err(err) => {
+                error!(error = %err, "Error while getting protocol systems.");
+                Err(err.into())
+            }
+        }
+    }
+
+    #[instrument(skip(self, request))]
     async fn get_tokens(
         &self,
         request: &dto::TokensRequestBody,
@@ -545,7 +609,7 @@ where
             .pending_deltas
             .as_ref()
             .map_or(Ok(Vec::new()), |pending_delta| {
-                pending_delta.get_new_components(ids_slice, &system)
+                pending_delta.get_new_components(ids_slice, &system, request.tvl_gt)
             })?;
 
         debug!(n_components = buffered_components.len(), "RetrievedBufferedComponents");
@@ -567,7 +631,11 @@ where
                             .min(total as usize),
                     )
                     .take(pagination_params.page_size as usize)
-                    .map(dto::ProtocolComponent::from)
+                    .map(|c| {
+                        let mut pc = dto::ProtocolComponent::from(c);
+                        pc.tokens.sort_unstable();
+                        pc
+                    })
                     .collect();
 
                 return Ok(dto::ProtocolComponentRequestResponse::new(
@@ -622,7 +690,11 @@ where
 
                 let response_components = components
                     .into_iter()
-                    .map(dto::ProtocolComponent::from)
+                    .map(|c| {
+                        let mut pc = dto::ProtocolComponent::from(c);
+                        pc.tokens.sort_unstable();
+                        pc
+                    })
                     .collect::<Vec<dto::ProtocolComponent>>();
                 Ok(dto::ProtocolComponentRequestResponse::new(
                     response_components,
@@ -665,11 +737,15 @@ pub async fn contract_state<G: Gateway>(
     // Note - filtering by protocol system is not supported on this endpoint. This is due to the
     // complexity of paginating this endpoint with the current design.
 
+    // Tracing and metrics
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
     tracing::Span::current().record("protocol.system", &body.protocol_system);
+    counter!("rpc_requests", "endpoint" => "contract_state").increment(1);
 
     if body.pagination.page_size > 100 {
+        counter!("rpc_requests_failed", "endpoint" => "contract_state", "status" => "400")
+            .increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
     }
 
@@ -683,6 +759,9 @@ pub async fn contract_state<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting contract state.");
+            let status = err.status_code().as_u16().to_string();
+            counter!("rpc_requests_failed", "endpoint" => "contract_state", "status" => status)
+                .increment(1);
             HttpResponse::from_error(err)
         }
     }
@@ -704,10 +783,13 @@ pub async fn tokens<G: Gateway>(
     body: web::Json<dto::TokensRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    // Tracing and metrics
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
+    counter!("rpc_requests", "endpoint" => "tokens").increment(1);
 
     if body.pagination.page_size > 3000 {
+        counter!("rpc_requests_failed", "endpoint" => "tokens", "status" => "400").increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 3000.");
     }
 
@@ -721,6 +803,9 @@ pub async fn tokens<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting tokens.");
+            let status = err.status_code().as_u16().to_string();
+            counter!("rpc_requests_failed", "endpoint" => "tokens", "status" => status)
+                .increment(1);
             HttpResponse::from_error(err)
         }
     }
@@ -742,11 +827,15 @@ pub async fn protocol_components<G: Gateway>(
     body: web::Json<dto::ProtocolComponentsRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    // Tracing and metrics
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
     tracing::Span::current().record("protocol.system", &body.protocol_system);
+    counter!("rpc_requests", "endpoint" => "protocol_components").increment(1);
 
     if body.pagination.page_size > 500 {
+        counter!("rpc_requests_failed", "endpoint" => "protocol_components", "status" => "400")
+            .increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 500.");
     }
 
@@ -760,6 +849,8 @@ pub async fn protocol_components<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting tokens.");
+            let status = err.status_code().as_u16().to_string();
+            counter!("rpc_requests_failed", "endpoint" => "protocol_components", "status" => status).increment(1);
             HttpResponse::from_error(err)
         }
     }
@@ -780,11 +871,15 @@ pub async fn protocol_state<G: Gateway>(
     body: web::Json<dto::ProtocolStateRequestBody>,
     handler: web::Data<RpcHandler<G>>,
 ) -> HttpResponse {
+    // Tracing and metrics
     tracing::Span::current().record("page", body.pagination.page);
     tracing::Span::current().record("page.size", body.pagination.page_size);
     tracing::Span::current().record("protocol.system", &body.protocol_system);
+    counter!("rpc_requests", "endpoint" => "protocol_state").increment(1);
 
     if body.pagination.page_size > 100 {
+        counter!("rpc_requests_failed", "endpoint" => "protocol_state", "status" => "400")
+            .increment(1);
         return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
     }
 
@@ -798,6 +893,53 @@ pub async fn protocol_state<G: Gateway>(
         Ok(state) => HttpResponse::Ok().json(state),
         Err(err) => {
             error!(error = %err, ?body, "Error while getting protocol states.");
+            let status = err.status_code().as_u16().to_string();
+            counter!("rpc_requests_failed", "endpoint" => "protocol_state", "status" => status)
+                .increment(1);
+            HttpResponse::from_error(err)
+        }
+    }
+}
+
+/// Retrieve protocol systems
+///
+/// This endpoint retrieves the protocol systems available in the indexer.
+#[utoipa::path(
+    post,
+    path = "/v1/protocol_systems",
+    responses(
+        (status = 200, description = "OK", body = ProtocolSystemsRequestResponse),
+    ),
+    request_body = ProtocolSystemsRequestBody,
+)]
+pub async fn protocol_systems<G: Gateway>(
+    body: web::Json<dto::ProtocolSystemsRequestBody>,
+    handler: web::Data<RpcHandler<G>>,
+) -> HttpResponse {
+    // Tracing and metrics
+    tracing::Span::current().record("page", body.pagination.page);
+    tracing::Span::current().record("page.size", body.pagination.page_size);
+    counter!("rpc_requests", "endpoint" => "protocol_systems").increment(1);
+
+    if body.pagination.page_size > 100 {
+        counter!("rpc_requests_failed", "endpoint" => "protocol_systems", "status" => "400")
+            .increment(1);
+        return HttpResponse::BadRequest().body("Page size must be less than or equal to 100.");
+    }
+
+    // Call the handler to get protocol systems
+    let response = handler
+        .into_inner()
+        .get_protocol_systems(&body)
+        .await;
+
+    match response {
+        Ok(systems) => HttpResponse::Ok().json(systems),
+        Err(err) => {
+            error!(error = %err, ?body, "Error while getting protocol systems.");
+            let status = err.status_code().as_u16().to_string();
+            counter!("rpc_requests_failed", "endpoint" => "protocol_systems", "status" => status)
+                .increment(1);
             HttpResponse::from_error(err)
         }
     }
@@ -814,17 +956,18 @@ pub async fn protocol_state<G: Gateway>(
     ),
 )]
 pub async fn health() -> HttpResponse {
+    counter!("rpc_requests", "endpoint" => "health").increment(1);
     HttpResponse::Ok().json(dto::Health::Ready)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, str::FromStr};
-
+    use super::*;
     use actix_web::test;
     use chrono::NaiveDateTime;
-
     use mockall::mock;
+    use std::{collections::HashMap, str::FromStr};
+
     use tycho_core::{
         models::{
             contract::Account,
@@ -833,12 +976,9 @@ mod tests {
             ChangeType,
         },
         storage::WithTotal,
-        Bytes,
     };
 
     use crate::testing::{evm_contract_slots, MockGateway};
-
-    use super::*;
 
     const WETH: &str = "C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
     const USDC: &str = "A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -867,6 +1007,7 @@ mod tests {
                 &self,
                 ids: Option<&'a [&'a str]>,
                 protocol_system: &'a str,
+                min_tvl: Option<f64>,
             ) -> Result<Vec<ProtocolComponent>, PendingDeltasError>;
 
             fn get_block_finality<'a>(
@@ -874,6 +1015,12 @@ mod tests {
                 version: BlockNumberOrTimestamp,
                 protocol_system: &'a str,
             ) -> Result<Option<FinalityStatus>, PendingDeltasError>;
+
+            fn search_block<'a>(
+                &self,
+                f: &dyn Fn(&BlockAggregatedChanges) -> bool,
+                protocol_system: &'a str,
+            ) -> Result<Option<BlockAggregatedChanges>,PendingDeltasError>;
         }
     }
 
@@ -977,6 +1124,7 @@ mod tests {
             "account0".to_owned(),
             evm_contract_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
             Bytes::from(101u8).lpad(32, 0),
+            HashMap::new(),
             Bytes::from("C0C0C0"),
             "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                 .parse()
@@ -1007,6 +1155,7 @@ mod tests {
             "account1".to_owned(),
             evm_contract_slots([(6, 30), (5, 25), (1, 3), (2, 1), (0, 2)]),
             Bytes::from(101u8).lpad(32, 0),
+            HashMap::new(),
             Bytes::from("C0C0C0"),
             "0x106781541fd1c596ade97569d584baf47e3347d3ac67ce7757d633202061bdc4"
                 .parse()
@@ -1198,12 +1347,16 @@ mod tests {
     #[tokio::test]
     async fn test_get_protocol_components() {
         let mut gw = MockGateway::new();
+
+        let unsorted_tokens =
+            vec![Bytes::from_str("0x01").unwrap(), Bytes::from_str("0x00").unwrap()];
+
         let expected = ProtocolComponent::new(
             "comp1",
             "ambient",
             "pool",
             Chain::Ethereum,
-            vec![],
+            vec![Bytes::from_str("0x00").unwrap(), Bytes::from_str("0x01").unwrap()],
             vec![],
             HashMap::new(),
             ChangeType::Creation,
@@ -1212,7 +1365,12 @@ mod tests {
                 .unwrap(),
             NaiveDateTime::default(),
         );
-        let mock_response = Ok(WithTotal { entity: vec![expected.clone()], total: Some(1) });
+
+        let mut mock_res = expected.clone();
+        mock_res
+            .tokens
+            .clone_from(&unsorted_tokens);
+        let mock_response = Ok(WithTotal { entity: vec![mock_res], total: Some(1) });
         gw.expect_get_protocol_components()
             .return_once(|_, _, _, _, _| Box::pin(async move { mock_response }));
 
@@ -1222,7 +1380,7 @@ mod tests {
             "ambient",
             "pool",
             Chain::Ethereum,
-            vec![],
+            vec![Bytes::from_str("0x00").unwrap(), Bytes::from_str("0x01").unwrap()],
             vec![],
             HashMap::new(),
             ChangeType::Creation,
@@ -1231,12 +1389,12 @@ mod tests {
                 .unwrap(),
             NaiveDateTime::default(),
         );
+
+        let mut mock_res = buf_expected.clone();
+        mock_res.tokens = unsorted_tokens;
         mock_buffer
             .expect_get_new_components()
-            .return_once({
-                let buf_expected_clone = buf_expected.clone();
-                move |_, _| Ok(vec![buf_expected_clone])
-            });
+            .return_once(move |_, _, _| Ok(vec![mock_res]));
 
         let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));
 
@@ -1328,7 +1486,7 @@ mod tests {
             .returning({
                 let buf_expected1_clone = buf_expected1.clone();
                 let buf_expected2_clone = buf_expected2.clone();
-                move |_, _| Ok(vec![buf_expected1_clone.clone(), buf_expected2_clone.clone()])
+                move |_, _, _| Ok(vec![buf_expected1_clone.clone(), buf_expected2_clone.clone()])
             });
 
         let req_handler = RpcHandler::new(gw, Some(Arc::new(mock_buffer)));

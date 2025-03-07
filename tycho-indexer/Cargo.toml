@@ -1,6 +1,6 @@
 [package]
 name = "tycho-indexer"
-version = "0.42.1"
+version = "0.57.2"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -32,10 +32,12 @@ tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 async-stream = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-retry = "0.3"
-tonic = { version = "0.9", features = ["tls-roots"] }
+tonic = { version = "0.9", features = ["tls-roots", "gzip"] }
 prost = "0.11"
 prost-types = "0.11"
 clap = { workspace = true, features = ["derive", "env"] }

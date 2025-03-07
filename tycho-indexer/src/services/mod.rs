@@ -11,20 +11,21 @@ use tracing::info;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::{
-    extractor::{runner::ExtractorHandle, ExtractionError},
-    services::deltas_buffer::PendingDeltas,
-};
 use tycho_core::{
     dto::{
         AccountUpdate, BlockParam, Chain, ChangeType, ContractId, Health, PaginationParams,
         PaginationResponse, ProtocolComponent, ProtocolComponentRequestResponse,
         ProtocolComponentsRequestBody, ProtocolId, ProtocolStateDelta, ProtocolStateRequestBody,
-        ProtocolStateRequestResponse, ResponseAccount, ResponseProtocolState, ResponseToken,
-        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
-        VersionParam,
+        ProtocolStateRequestResponse, ProtocolSystemsRequestBody, ProtocolSystemsRequestResponse,
+        ResponseAccount, ResponseProtocolState, ResponseToken, StateRequestBody,
+        StateRequestResponse, TokensRequestBody, TokensRequestResponse, VersionParam,
     },
     storage::Gateway,
+};
+
+use crate::{
+    extractor::{runner::ExtractorHandle, ExtractionError},
+    services::deltas_buffer::PendingDeltas,
 };
 
 mod cache;
@@ -97,6 +98,7 @@ where
                 rpc::protocol_components,
                 rpc::protocol_state,
                 rpc::health,
+                rpc::protocol_systems
             ),
             components(
                 schemas(VersionParam),
@@ -122,6 +124,8 @@ where
                 schemas(ChangeType),
                 schemas(ProtocolStateDelta),
                 schemas(Health),
+                schemas(ProtocolSystemsRequestBody),
+                schemas(ProtocolSystemsRequestResponse),
             )
         )]
         struct ApiDoc;
@@ -206,6 +210,10 @@ where
                     web::resource(format!("/{}/health", self.prefix))
                         .route(web::get().to(rpc::health)),
                 )
+                .service(
+                    web::resource(format!("/{}/protocol_systems", self.prefix))
+                        .route(web::post().to(rpc::protocol_systems::<G>)),
+                )
                 .wrap(RequestTracing::new())
                 .service(
                     SwaggerUi::new("/docs/{_:.*}").url("/api-docs/openapi.json", openapi.clone()),
@@ -220,7 +228,11 @@ where
 
             app
         })
-        .bind((self.bind, self.port))
+        .keep_alive(std::time::Duration::from_secs(60)) // prevents early connection closures
+        // Allows clients up to 30 seconds to reconnect before forcefully closing the connection.
+        // This prevents us from closing a connection the client is expecting to be able to reuse.
+        .client_disconnect_timeout(std::time::Duration::from_secs(30))
+        .bind_auto_h2c((self.bind, self.port)) // allow HTTP2 requests over http connections
         .map_err(|err| ExtractionError::ServiceError(err.to_string()))?
         .run();
         let handle = server.handle();

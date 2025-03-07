@@ -620,7 +620,12 @@ impl DeltasClient for WsDeltasClient {
                     .header(SEC_WEBSOCKET_VERSION, 13)
                     .header(CONNECTION, "Upgrade")
                     .header(UPGRADE, "websocket")
-                    .header(HOST, "tycho-beta.propellerheads.xyz")
+                    .header(
+                        HOST,
+                        this.uri
+                            .host()
+                            .expect("no host found in tycho url"),
+                    )
                     .header(USER_AGENT, format!("tycho-client-{}", env!("CARGO_PKG_VERSION")));
 
                 // Add Authorization if one is given
@@ -881,6 +886,16 @@ mod tests {
                                         "component_id": "protocol_1"
                                     }
                                 }
+                        },
+                        "account_balances": {
+                            "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                                    "account": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                                    "token": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                                    "balance": "0x01f4",
+                                    "modify_tx": "0x01"
+                                }
+                            }
                         },
                         "component_tvl": {
                             "protocol_1": 1000.0
@@ -1172,6 +1187,16 @@ mod tests {
                                     "balance_float": 1000.0,
                                     "modify_tx": "0x01",
                                     "component_id": "protocol_1"
+                                }
+                            }
+                        },
+                        "account_balances": {
+                            "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                                    "account": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                                    "token": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                                    "balance": "0x01f4",
+                                    "modify_tx": "0x01"
                                 }
                             }
                         },

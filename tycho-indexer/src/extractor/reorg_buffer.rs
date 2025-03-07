@@ -6,8 +6,9 @@ use tracing::{debug, instrument, trace, warn, Level};
 use tycho_core::{
     models::{
         blockchain::{Block, BlockScoped},
+        contract::AccountBalance,
         protocol::ComponentBalance,
-        AttrStoreKey, ComponentId, StoreVal,
+        Address, AttrStoreKey, ComponentId, StoreVal,
     },
     storage::{BlockIdentifier, BlockOrTimestamp, StorageError},
     Bytes,
@@ -177,6 +178,9 @@ where
     /// The retrieved iterator will include both the start and end block of specified range. In case
     /// either start or end block are None, the iterator will start the range at the oldest / end
     /// the range at the latest block.
+    /// If the end version is a timestamp, it will be compared to the timestamp of the last block in
+    /// the buffer. If the timestamp is greater than the last block's timestamp, the range will be
+    /// returned from the start of the buffer to the last block.
     #[instrument(skip(self), level = Level::DEBUG, fields(buffered_range))]
     pub fn get_block_range(
         &self,
@@ -200,21 +204,32 @@ where
             0
         };
 
-        let end_index = if let Some(version) = end_version {
-            let end_idx = self
-                .find_index(|b| !version.greater_than(&b.block()))
-                .ok_or_else(|| {
-                    StorageError::NotFound("Block".to_string(), format!("{:?}", version))
-                })?;
+        let end_index = match end_version {
+            Some(version) => {
+                // Handle case where timestamp is beyond last block.
+                // Additionally, latest ts (NOW) is always beyond last block.
+                if let Some(last) = self.block_messages.back() {
+                    if let BlockNumberOrTimestamp::Timestamp(ts) = version {
+                        if ts > last.block().ts {
+                            return Ok(self.block_messages.range(start_index..));
+                        }
+                    }
+                }
 
-            if end_idx < start_index {
-                return Err(StorageError::Unexpected(
-                    "ReorgBuffer: Invalid block range".to_string(),
-                ));
+                let end_idx = self
+                    .find_index(|b| !version.greater_than(&b.block()))
+                    .ok_or_else(|| {
+                        StorageError::NotFound("Block".to_string(), format!("{:?}", version))
+                    })?;
+
+                if end_idx < start_index {
+                    return Err(StorageError::Unexpected(
+                        "ReorgBuffer: Invalid block range".to_string(),
+                    ));
+                }
+                end_idx + 1
             }
-            end_idx + 1
-        } else {
-            self.block_messages.len()
+            None => self.block_messages.len(),
         };
 
         Ok(self
@@ -268,11 +283,17 @@ pub(crate) trait StateUpdateBufferEntry: std::fmt::Debug {
         keys: Vec<(&AccountStateIdType, &AccountStateKeyType)>,
     ) -> HashMap<(AccountStateIdType, AccountStateKeyType), AccountStateValueType>;
 
-    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
-    fn get_filtered_balance_update(
+    #[allow(clippy::mutable_key_type)]
+    fn get_filtered_component_balance_update(
         &self,
         keys: Vec<(&String, &Bytes)>,
     ) -> HashMap<(String, Bytes), ComponentBalance>;
+
+    #[allow(clippy::mutable_key_type)]
+    fn get_filtered_account_balance_update(
+        &self,
+        keys: Vec<(&Address, &Address)>,
+    ) -> HashMap<(Address, Address), AccountBalance>;
 }
 
 impl<B> ReorgBuffer<B>
@@ -319,10 +340,7 @@ where
 
     /// Looks up buffered account state updates for the provided keys. Returns a map of updates and
     /// a list of keys for which updates were not found in the buffered blocks.
-    ///
-    /// Clippy thinks it is a complex type that is difficult to read
-    #[allow(clippy::type_complexity)]
-    #[allow(clippy::mutable_key_type)]
+    #[allow(clippy::mutable_key_type, clippy::type_complexity)]
     pub fn lookup_account_state(
         &self,
         keys: &[(&AccountStateIdType, &AccountStateKeyType)],
@@ -360,9 +378,8 @@ where
     /// Looks up buffered balance updates for the provided component and token keys. Returns a map
     /// where each key is a component ID associated with its token balances, and a list of
     /// component-token pairs for which no updates were found.
-    #[allow(clippy::mutable_key_type)] // Clippy thinks that tuple with Bytes are a mutable type.
-    #[allow(clippy::type_complexity)]
-    pub fn lookup_balances(
+    #[allow(clippy::type_complexity, clippy::mutable_key_type)]
+    pub fn lookup_component_balances(
         &self,
         keys: &[(&ComponentId, &Bytes)],
     ) -> (HashMap<String, HashMap<Bytes, ComponentBalance>>, Vec<(ComponentId, Bytes)>) {
@@ -376,7 +393,9 @@ where
             if remaning_keys.is_empty() {
                 break;
             }
-            for (key, val) in block_message.get_filtered_balance_update(keys.to_vec().clone()) {
+            for (key, val) in
+                block_message.get_filtered_component_balance_update(keys.to_vec().clone())
+            {
                 if remaning_keys.remove(&key) {
                     res.entry(key).or_insert(val);
                 }
@@ -393,19 +412,55 @@ where
 
         (results, remaning_keys.into_iter().collect())
     }
+
+    /// Looks up buffered account balance updates for the provided account and token keys. Returns a
+    /// map where each key is an account address associated with its token balances, and a list
+    /// of account-token pairs for which no updates were found.
+    #[allow(clippy::type_complexity, clippy::mutable_key_type)]
+    pub fn lookup_account_balances(
+        &self,
+        keys: &[(&Address, &Address)],
+    ) -> (HashMap<Address, HashMap<Address, AccountBalance>>, Vec<(Address, Address)>) {
+        let mut res = HashMap::new();
+        let mut remaning_keys = keys
+            .iter()
+            .map(|(account, token)| (account.to_owned().to_owned(), token.to_owned().to_owned()))
+            .collect::<HashSet<_>>();
+
+        for block_message in self.block_messages.iter().rev() {
+            if remaning_keys.is_empty() {
+                break;
+            }
+            for (key, val) in
+                block_message.get_filtered_account_balance_update(keys.to_vec().clone())
+            {
+                if remaning_keys.remove(&key) {
+                    res.entry(key).or_insert(val);
+                }
+            }
+        }
+
+        let mut results: HashMap<Address, HashMap<Address, AccountBalance>> = HashMap::new();
+        for ((account, token), val) in res {
+            results
+                .entry(account)
+                .or_default()
+                .insert(token, val);
+        }
+
+        (results, remaning_keys.into_iter().collect())
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use chrono::NaiveDateTime;
+    use super::*;
     use rstest::rstest;
     use std::str::FromStr;
 
-    use super::*;
-
     use tycho_core::models::{
-        blockchain::Transaction,
-        protocol::{ProtocolChangesWithTx, ProtocolComponentStateDelta},
+        blockchain::{Transaction, TxWithChanges},
+        protocol::ProtocolComponentStateDelta,
         Chain,
     };
 
@@ -421,7 +476,15 @@ mod test {
         )
     }
 
+    const VM_CONTRACT_1: &str = "0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688";
+    const VM_CONTRACT_2: &str = "0xbbbbbbbbb24eeeb8d57d431224f73832bc34f688";
+
+    const DAI_ADDRESS: &str = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
+
     fn get_block_changes(version: u8) -> BlockChanges {
+        let token_addr = Bytes::from_str(DAI_ADDRESS).unwrap();
+        let account1_addr = Bytes::from_str(VM_CONTRACT_1).unwrap();
+        let account2_addr = Bytes::from_str(VM_CONTRACT_2).unwrap();
         match version {
             1 => {
                 let tx = transaction();
@@ -437,17 +500,14 @@ mod test {
                         deleted_attributes: HashSet::new(),
                     },
                 )]);
-                let new_balances = HashMap::from([
+                let component_balances = HashMap::from([
                     (
                         "Balance1".to_string(),
                         [(
-                            Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                            token_addr.clone(),
                             ComponentBalance {
-                                token: Bytes::from_str(
-                                    "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-                                )
-                                .unwrap(),
-                                balance: Bytes::from(1_i32.to_le_bytes()),
+                                token: token_addr.clone(),
+                                balance: Bytes::from(1_i32.to_be_bytes()),
                                 modify_tx: tx.hash.clone(),
                                 component_id: "Balance1".to_string(),
                                 balance_float: 1.0,
@@ -461,11 +521,8 @@ mod test {
                         [(
                             Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
                             ComponentBalance {
-                                token: Bytes::from_str(
-                                    "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-                                )
-                                .unwrap(),
-                                balance: Bytes::from(30_i32.to_le_bytes()),
+                                token: token_addr.clone(),
+                                balance: Bytes::from(30_i32.to_be_bytes()),
                                 modify_tx: tx.hash.clone(),
                                 component_id: "Balance2".to_string(),
                                 balance_float: 30.0,
@@ -482,13 +539,12 @@ mod test {
                     testing::block(1),
                     0,
                     false,
-                    vec![ProtocolChangesWithTx {
-                        protocol_states: state_updates,
+                    vec![TxWithChanges {
+                        state_updates,
+                        balance_changes: component_balances,
                         tx,
-                        balance_changes: new_balances,
                         ..Default::default()
-                    }
-                    .into()],
+                    }],
                 )
             }
             2 => {
@@ -517,6 +573,36 @@ mod test {
                         },
                     ),
                 ]);
+                let account_balances = HashMap::from([
+                    (
+                        account1_addr.clone(),
+                        [(
+                            token_addr.clone(),
+                            AccountBalance {
+                                token: token_addr.clone(),
+                                balance: Bytes::from(2_i32.to_be_bytes()),
+                                modify_tx: tx.hash.clone(),
+                                account: account1_addr.clone(),
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    (
+                        account2_addr.clone(),
+                        [(
+                            token_addr.clone(),
+                            AccountBalance {
+                                token: token_addr.clone(),
+                                balance: Bytes::from(30_i32.to_be_bytes()),
+                                modify_tx: tx.hash.clone(),
+                                account: account2_addr,
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                ]);
 
                 BlockChanges::new(
                     "test".to_string(),
@@ -524,28 +610,40 @@ mod test {
                     testing::block(2),
                     0,
                     false,
-                    vec![ProtocolChangesWithTx {
-                        protocol_states: state_updates,
+                    vec![TxWithChanges {
+                        state_updates,
+                        account_balance_changes: account_balances,
                         tx,
                         ..Default::default()
-                    }
-                    .into()],
+                    }],
                 )
             }
             3 => {
                 let tx = transaction();
-
-                let balance_changes = HashMap::from([(
+                let component_balances = HashMap::from([(
                     "Balance1".to_string(),
                     [(
-                        Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
+                        token_addr.clone(),
                         ComponentBalance {
-                            token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                .unwrap(),
-                            balance: Bytes::from(3_i32.to_le_bytes()),
+                            token: token_addr.clone(),
+                            balance: Bytes::from(3_i32.to_be_bytes()),
                             modify_tx: tx.hash.clone(),
                             component_id: "Balance1".to_string(),
                             balance_float: 3.0,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                )]);
+                let account_balances = HashMap::from([(
+                    account1_addr.clone(),
+                    [(
+                        token_addr.clone(),
+                        AccountBalance {
+                            token: token_addr,
+                            balance: Bytes::from(100_i32.to_be_bytes()),
+                            modify_tx: tx.hash.clone(),
+                            account: account1_addr,
                         },
                     )]
                     .into_iter()
@@ -558,7 +656,12 @@ mod test {
                     testing::block(3),
                     0,
                     false,
-                    vec![ProtocolChangesWithTx { tx, balance_changes, ..Default::default() }.into()],
+                    vec![TxWithChanges {
+                        tx,
+                        balance_changes: component_balances,
+                        account_balance_changes: account_balances,
+                        ..Default::default()
+                    }],
                 )
             }
             _ => panic!("block entity version not implemented"),
@@ -606,7 +709,7 @@ mod test {
     }
 
     #[test]
-    fn test_reorg_buffer_balance_lookup() {
+    fn test_component_balance_lookup() {
         let mut reorg_buffer = ReorgBuffer::new();
         reorg_buffer
             .insert_block(get_block_changes(1))
@@ -630,7 +733,7 @@ mod test {
             (&missing_component, &token_key),
         ];
 
-        let (res, mut missing_keys) = reorg_buffer.lookup_balances(&keys);
+        let (res, mut missing_keys) = reorg_buffer.lookup_component_balances(&keys);
 
         // Need to sort because collecting a HashSet is unstable.
         missing_keys.sort();
@@ -650,7 +753,7 @@ mod test {
                         token_key.clone(),
                         tycho_core::models::protocol::ComponentBalance {
                             token: token_key.clone(),
-                            balance: Bytes::from(3_i32.to_le_bytes()),
+                            balance: Bytes::from(3_i32.to_be_bytes()),
                             modify_tx: transaction().hash,
                             component_id: c_ids[0].clone(),
                             balance_float: 3.0,
@@ -663,10 +766,79 @@ mod test {
                         token_key.clone(),
                         tycho_core::models::protocol::ComponentBalance {
                             token: token_key.clone(),
-                            balance: Bytes::from(30_i32.to_le_bytes()),
+                            balance: Bytes::from(30_i32.to_be_bytes()),
                             modify_tx: transaction().hash,
                             component_id: c_ids[1].clone(),
                             balance_float: 30.0,
+                        }
+                    )])
+                )
+            ])
+        );
+    }
+
+    #[test]
+    fn test_account_balance_lookup() {
+        let mut reorg_buffer = ReorgBuffer::new();
+        reorg_buffer
+            .insert_block(get_block_changes(1))
+            .unwrap();
+        reorg_buffer
+            .insert_block(get_block_changes(2))
+            .unwrap();
+        reorg_buffer
+            .insert_block(get_block_changes(3))
+            .unwrap();
+
+        let accounts =
+            [Bytes::from_str(VM_CONTRACT_1).unwrap(), Bytes::from_str(VM_CONTRACT_2).unwrap()];
+        let token_key = Bytes::from_str(DAI_ADDRESS).unwrap();
+        let missing_token = Bytes::from_str("0x0000000000000000000000000000000000000000").unwrap();
+        let missing_account =
+            Bytes::from_str("0x0000000000000000000000000000000000000001").unwrap();
+
+        let keys = vec![
+            (&accounts[0], &token_key),
+            (&accounts[1], &token_key),
+            (&accounts[1], &missing_token),
+            (&missing_account, &token_key),
+        ];
+
+        let (res, mut missing_keys) = reorg_buffer.lookup_account_balances(&keys);
+
+        // Need to sort because collecting a HashSet is unstable.
+        missing_keys.sort();
+        assert_eq!(
+            missing_keys,
+            vec![
+                (missing_account.clone(), token_key.clone()),
+                (accounts[1].clone(), missing_token.clone())
+            ]
+        );
+        assert_eq!(
+            res,
+            HashMap::from([
+                (
+                    accounts[0].clone(),
+                    HashMap::from([(
+                        token_key.clone(),
+                        AccountBalance {
+                            token: token_key.clone(),
+                            balance: Bytes::from(100_i32.to_be_bytes()),
+                            modify_tx: transaction().hash,
+                            account: accounts[0].clone(),
+                        }
+                    )])
+                ),
+                (
+                    accounts[1].clone(),
+                    HashMap::from([(
+                        token_key.clone(),
+                        AccountBalance {
+                            token: token_key,
+                            balance: Bytes::from(30_i32.to_be_bytes()),
+                            modify_tx: transaction().hash,
+                            account: accounts[1].clone(),
                         }
                     )])
                 )
@@ -791,12 +963,12 @@ mod test {
     }
 
     #[rstest]
-    #[case::not_found(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), StorageError::NotFound("Block".to_string(), "Timestamp(2020-01-01T00:00:36)".to_string()))]
-    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), StorageError::Unexpected("ReorgBuffer: Invalid block range".to_string()))]
-    fn test_get_block_range_invalid_range(
+    #[case::beyond_range(Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:36".parse::<NaiveDateTime>().unwrap()), Ok(vec![1, 2]))]
+    #[case::invalid(Some("2020-01-01T00:00:24".parse::<NaiveDateTime>().unwrap()), Some("2020-01-01T00:00:12".parse::<NaiveDateTime>().unwrap()), Err(StorageError::Unexpected("ReorgBuffer: Invalid block range".to_string())))]
+    fn test_get_block_range_edge_cases(
         #[case] start: Option<NaiveDateTime>,
         #[case] end: Option<NaiveDateTime>,
-        #[case] exp: StorageError,
+        #[case] exp: Result<Vec<u64>, StorageError>,
     ) {
         let start = start.map(BlockNumberOrTimestamp::Timestamp);
         let end = end.map(BlockNumberOrTimestamp::Timestamp);
@@ -810,8 +982,10 @@ mod test {
 
         let res = reorg_buffer
             .get_block_range(start, end)
-            .err()
-            .unwrap();
+            .map(|iter| {
+                iter.map(|b| b.block().number)
+                    .collect::<Vec<_>>()
+            });
 
         assert_eq!(res, exp);
     }

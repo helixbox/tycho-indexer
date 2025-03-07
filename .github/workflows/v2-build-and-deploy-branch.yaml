@@ -12,6 +12,7 @@ on:
           - tycho-indexer
           - arbitrum-tycho-indexer
           - ethereum-tycho-indexer
+          - base-tycho-indexer
 
 permissions:
   id-token: write

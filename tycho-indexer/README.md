@@ -111,3 +111,27 @@ For more information about the flags, you can run:
 cargo run --bin tycho-indexer -- \
     {your-command} --help
 ```
+
+### Build tycho-indexer binary
+
+To build the tycho-indexer binary and make it globally accessible on your system, follow these steps:
+
+1. **Build the binary in release mode:**
+```bash
+cargo build --release
+```
+
+2. **Link the binary to a directory in your system's PATH:**
+```bash
+sudo ln -s $(pwd)/target/release/tycho-indexer /usr/local/bin/tycho-indexer
+```
+This creates a symbolic link, allowing you to run `tycho-indexer` from anywhere.
+Note: Ensure that `/usr/local/bin/` is included in your system's PATH. On most systems, this is the default, 
+but on minimalist Linux distributions or custom setups, you may need to verify or modify your PATH.
+
+3. **Verify the installation:**
+After completing the above steps, you can check that the binary is correctly linked by running:
+```bash
+tycho-indexer --help
+```
+This should display the help information for the `tycho-indexer` commands.

@@ -13,9 +13,7 @@ use tycho_core::{
     traits::TokenAnalyzer,
     Bytes,
 };
-use tycho_ethereum::{
-    token_analyzer::trace_call::TraceCallDetector, token_pre_processor::map_vault,
-};
+use tycho_ethereum::token_analyzer::trace_call::TraceCallDetector;
 
 use crate::cli::AnalyzeTokenArgs;
 
@@ -89,19 +87,36 @@ async fn analyze_batch(
         .map(|pc| (pc.id.clone(), pc))
         .collect::<HashMap<_, _>>();
 
+    let balance_owners = gw
+        .get_protocol_states(&chain, None, None, Some(&component_ids), false, None)
+        .await?
+        .entity
+        .into_iter()
+        .filter_map(|state| {
+            state
+                .attributes
+                .get("balance_owner")
+                .cloned()
+                .map(|owner| (state.component_id.clone(), owner))
+        })
+        .collect::<HashMap<_, _>>();
+
     let liquidity_token_owners = token_owner
         .into_iter()
         .filter_map(|(address, (cid, balance))| {
             if let Some(pc) = components.get(&cid) {
-                let liq_owner = map_vault(&pc.protocol_system).or_else(|| {
-                    pc.contract_addresses
-                        // TODO: Currently, it's assumed that the pool is always the first
-                        // contract in the protocol component. This approach is a temporary
-                        // workaround and needs to be revisited for a more robust solution.
-                        .first()
-                        .cloned()
-                        .or_else(|| Bytes::from_str(&pc.id).ok())
-                });
+                let liq_owner = balance_owners
+                    .get(&pc.id)
+                    .cloned()
+                    .or_else(|| {
+                        pc.contract_addresses
+                            // TODO: Currently, it's assumed that the pool is always the first
+                            // contract in the protocol component. This approach is a temporary
+                            // workaround and needs to be revisited for a more robust solution.
+                            .first()
+                            .cloned()
+                            .or_else(|| Bytes::from_str(&pc.id).ok())
+                    });
 
                 liq_owner.map(|liq_owner| (address, (liq_owner, balance)))
             } else {

@@ -88,7 +88,6 @@ pub mod hex_hashmap_key {
 
     use serde::{de, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
-    #[allow(clippy::mutable_key_type)]
     pub fn serialize<S, V>(x: &HashMap<Bytes, V>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -127,7 +126,6 @@ pub mod hex_hashmap_value {
 
     use serde::{de, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
-    #[allow(clippy::mutable_key_type)]
     pub fn serialize<S, K>(x: &HashMap<K, Bytes>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -167,7 +165,6 @@ pub mod hex_hashmap_key_value {
 
     use super::decode_hex_with_prefix;
 
-    #[allow(clippy::mutable_key_type)]
     pub fn serialize<S>(x: &HashMap<Bytes, Bytes>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

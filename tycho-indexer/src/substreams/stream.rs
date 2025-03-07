@@ -1,13 +1,16 @@
-use anyhow::{anyhow, Error};
-use async_stream::try_stream;
-use futures03::{Stream, StreamExt};
-use once_cell::sync::Lazy;
 use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+use anyhow::{anyhow, Error};
+use async_stream::try_stream;
+use futures03::{Stream, StreamExt};
+use metrics::{counter, gauge};
+use once_cell::sync::Lazy;
+use prost::Message as ProstMessage;
 use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, trace, warn};
@@ -30,6 +33,7 @@ pub struct SubstreamsStream {
 }
 
 impl SubstreamsStream {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         endpoint: Arc<SubstreamsEndpoint>,
         cursor: Option<String>,
@@ -38,6 +42,7 @@ impl SubstreamsStream {
         start_block: i64,
         end_block: u64,
         final_blocks_only: bool,
+        extractor_id: String,
     ) -> Self {
         SubstreamsStream {
             stream: Box::pin(stream_blocks(
@@ -48,6 +53,7 @@ impl SubstreamsStream {
                 start_block,
                 end_block,
                 final_blocks_only,
+                extractor_id,
             )),
         }
     }
@@ -57,6 +63,7 @@ static DEFAULT_BACKOFF: Lazy<ExponentialBackoff> =
     Lazy::new(|| ExponentialBackoff::from_millis(500).max_delay(Duration::from_secs(45)));
 
 // Create the Stream implementation that streams blocks with auto-reconnection.
+#[allow(clippy::too_many_arguments)]
 fn stream_blocks(
     endpoint: Arc<SubstreamsEndpoint>,
     cursor: Option<String>,
@@ -65,8 +72,10 @@ fn stream_blocks(
     start_block_num: i64,
     stop_block_num: u64,
     final_blocks_only: bool,
+    extractor_id: String,
 ) -> impl Stream<Item = Result<BlockResponse, Error>> {
     let mut latest_cursor = cursor.unwrap_or_default();
+    let mut latest_block = start_block_num as u64;
     let mut retry_count = 0;
     let mut backoff = DEFAULT_BACKOFF.clone();
 
@@ -96,6 +105,17 @@ fn stream_blocks(
                     for await response in stream {
                         match process_substreams_response(response).await {
                             BlockProcessedResult::BlockScopedData(block_scoped_data) => {
+                                if let Some(block) = block_scoped_data.clock.clone() {
+                                    if let Some(block_ts) = block.timestamp {
+                                        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards!?").as_millis();
+                                        let lag = now.saturating_sub((block_ts.seconds * 1000) as u128);
+                                        gauge!("substreams_lag_millis", "extractor" => extractor_id.clone()).set(lag as f64);
+                                    }
+                                    latest_block = block.number;
+                                };
+
+                                gauge!("block_message_size_bytes", "extractor" => extractor_id.clone()).set(block_scoped_data.encoded_len() as f64);
+
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
 
@@ -108,6 +128,15 @@ fn stream_blocks(
                                 // Reset backoff because we got a good value from the stream
                                 backoff = DEFAULT_BACKOFF.clone();
 
+                                let to_block = block_undo_signal.last_valid_block.clone().unwrap_or_default().number;
+                                counter!(
+                                    "chain_reorg",
+                                    "extractor" => extractor_id.clone(),
+                                    "to_block" => to_block.to_string(),
+                                    "from_block" => latest_block.to_string()
+                                )
+                                .increment(1);
+
                                 let cursor = block_undo_signal.last_valid_cursor.clone();
                                 yield BlockResponse::Undo(block_undo_signal);
 
@@ -118,10 +147,12 @@ fn stream_blocks(
                                 // Unauthenticated errors are not retried, we forward the error back to the
                                 // stream consumer which handles it
                                 if status.code() == tonic::Code::Unauthenticated {
+                                    counter!("substreams_failure", "extractor" => extractor_id.clone(), "cause" => "unauthenticated").increment(1);
                                     return Err(anyhow::Error::new(status.clone()))?;
                                 }
 
                                 error!("Received tonic error {:#}", status);
+                                counter!("substreams_failure", "extractor" => extractor_id.clone(), "cause" => "tonic_error").increment(1);
 
                                 // If we reach this point, we must wait a bit before retrying
                                 if let Some(duration) = backoff.next() {
@@ -129,6 +160,7 @@ fn stream_blocks(
                                     sleep(duration).await;
                                     retry_count += 1;
                                 } else {
+                                    counter!("substreams_failure", "extractor" => extractor_id.clone(), "cause" => "max_retries_exceeded").increment(1);
                                     return Err(anyhow!("Backoff requested to stop retrying, quitting"))?;
                                 }
 
@@ -144,7 +176,7 @@ fn stream_blocks(
                     // We failed to connect and will try again; this is another
                     // case where we actually _want_ to back off in case we keep
                     // having connection errors.
-
+                    counter!("substreams_failure", "module" => output_module_name.clone(), "cause" => "connection_error").increment(1);
                     error!("Unable to connect to endpoint: {:#}", e);
                 }
             }

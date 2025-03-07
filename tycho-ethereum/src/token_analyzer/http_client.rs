@@ -1,9 +1,6 @@
 use anyhow::{anyhow, Result};
 use reqwest::{Client, ClientBuilder, Response};
-use std::{
-    fmt::{self, Display, Formatter},
-    time::Duration,
-};
+use std::{fmt, time::Duration};
 
 const USER_AGENT: &str = "propeller-tycho-ethereum";
 
@@ -61,8 +58,8 @@ pub struct Arguments {
     pub http_timeout: Duration,
 }
 
-impl Display for Arguments {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl fmt::Display for Arguments {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self { http_timeout } = self;
 
         writeln!(f, "http_timeout: {:?}", http_timeout)

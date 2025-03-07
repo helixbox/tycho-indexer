@@ -153,6 +153,7 @@ mod test {
                     },
                 )]),
                 account_deltas: Default::default(),
+                account_balance_changes: Default::default(),
             }],
         );
 
@@ -189,6 +190,7 @@ mod test {
                     .protocol_components
                     .clone(),
                 account_deltas: Default::default(),
+                account_balance_changes: Default::default(),
             }],
         );
 
@@ -234,6 +236,7 @@ mod test {
                 balance_changes: HashMap::new(),
                 protocol_components: HashMap::new(),
                 account_deltas: Default::default(),
+                account_balance_changes: Default::default(),
             }],
         );
 
@@ -290,6 +293,7 @@ mod test {
                 ),
                 state_updates: HashMap::new(),
                 balance_changes: HashMap::new(),
+                account_balance_changes: Default::default(),
             }],
         );
 
@@ -337,6 +341,7 @@ mod test {
                 ),
                 state_updates: HashMap::new(),
                 balance_changes: HashMap::new(),
+                account_balance_changes: Default::default(),
             }],
         );
 

@@ -53,25 +53,13 @@ pub mod fixtures {
         use crate::pb::tycho::evm::v1::*;
         ProtocolComponent {
             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902".to_owned(),
-            tokens: vec![
-                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .0
-                    .to_vec(),
-                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                    .unwrap()
-                    .0
-                    .to_vec(),
-            ],
+            tokens: vec![address_from_str(DAI_ADDRESS), address_from_str(DAI_ADDRESS)],
             contracts: vec![
                 Bytes::from_str("0x31fF2589Ee5275a2038beB855F44b9Be993aA804")
                     .unwrap()
                     .0
                     .to_vec(),
-                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                    .unwrap()
-                    .0
-                    .to_vec(),
+                address_from_str(WETH_ADDRESS),
             ],
             static_att: vec![
                 Attribute {
@@ -199,25 +187,21 @@ pub mod fixtures {
                                 },
                             ],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 50000000.encode_to_vec(),
+                            }],
                         }],
                         component_changes: vec![ProtocolComponent {
                             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
                                 .to_owned(),
                             tokens: vec![
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .to_vec(),
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .to_vec(),
+                                address_from_str(DAI_ADDRESS),
+                                address_from_str(DAI_ADDRESS),
                             ],
                             contracts: vec![
-                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                    .unwrap()
-                                    .to_vec(),
-                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                    .unwrap()
-                                    .to_vec(),
+                                address_from_str(WETH_ADDRESS),
+                                address_from_str(WETH_ADDRESS),
                             ],
                             static_att: vec![
                                 Attribute {
@@ -240,11 +224,7 @@ pub mod fixtures {
                             }),
                         }],
                         balance_changes: vec![BalanceChange {
-                            token: hex::decode(
-                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-                                    .trim_start_matches("0x"),
-                            )
-                            .unwrap(),
+                            token: address_from_str(WETH_ADDRESS),
                             balance: 50000000.encode_to_vec(),
                             component_id:
                                 "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
@@ -292,14 +272,14 @@ pub mod fixtures {
                                 },
                             ],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 10.encode_to_vec(),
+                            }],
                         }],
                         component_changes: vec![],
                         balance_changes: vec![BalanceChange {
-                            token: hex::decode(
-                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-                                    .trim_start_matches("0x"),
-                            )
-                            .unwrap(),
+                            token: address_from_str(WETH_ADDRESS),
                             balance: 10.encode_to_vec(),
                             component_id:
                                 "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
@@ -323,6 +303,16 @@ pub mod fixtures {
                             value: Bytes::from("0x01").into(),
                         }],
                         change: ChangeType::Creation.into(),
+                        token_balances: vec![
+                            AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                            },
+                            AccountBalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                            },
+                        ],
                     }],
                     component_changes: vec![ProtocolComponent {
                         id: "pc_1".to_owned(),
@@ -368,6 +358,7 @@ pub mod fixtures {
                                 value: Bytes::from("0x02").into(),
                             }],
                             change: ChangeType::Creation.into(),
+                            token_balances: vec![],
                         },
                         ContractChange {
                             address: address_from_str("0000000000000000000000000000000000000001"),
@@ -384,6 +375,10 @@ pub mod fixtures {
                                 },
                             ],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 10.encode_to_vec(),
+                            }],
                         },
                     ],
                     component_changes: vec![ProtocolComponent {
@@ -440,6 +435,7 @@ pub mod fixtures {
                                     value: Bytes::from("0x01").into(),
                                 }],
                                 change: ChangeType::Update.into(),
+                                token_balances: vec![],
                             },
                             ContractChange {
                                 address: address_from_str(
@@ -452,6 +448,10 @@ pub mod fixtures {
                                     value: Bytes::from(200u8).lpad(32, 0).into(),
                                 }],
                                 change: ChangeType::Update.into(),
+                                token_balances: vec![AccountBalanceChange {
+                                    token: address_from_str(USDC_ADDRESS),
+                                    balance: 1_i32.to_be_bytes().to_vec(),
+                                }],
                             },
                         ],
                         component_changes: vec![],
@@ -472,6 +472,10 @@ pub mod fixtures {
                                 value: Bytes::from("0x01").into(),
                             }],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 2_i32.to_be_bytes().to_vec(),
+                            }],
                         }],
                         component_changes: vec![],
                         balance_changes: vec![
@@ -502,6 +506,7 @@ pub mod fixtures {
                             value: Bytes::from(10u8).lpad(32, 0).into(),
                         }],
                         change: ChangeType::Update.into(),
+                        token_balances: vec![],
                     }],
                     component_changes: vec![ProtocolComponent {
                         id: "pc_3".to_owned(),
@@ -535,6 +540,10 @@ pub mod fixtures {
                                 value: Bytes::from(10u8).lpad(32, 0).into(),
                             }],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                            }],
                         },
                         ContractChange {
                             address: address_from_str("0000000000000000000000000000000000000002"),
@@ -545,6 +554,10 @@ pub mod fixtures {
                                 value: Bytes::from(10u8).lpad(32, 0).into(),
                             }],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                            }],
                         },
                     ],
                     component_changes: vec![],
@@ -672,21 +685,10 @@ pub mod fixtures {
                         component_changes: vec![ProtocolComponent {
                             id: "Pool".to_owned(),
                             tokens: vec![
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
+                                address_from_str(DAI_ADDRESS),
+                                address_from_str(DAI_ADDRESS),
                             ],
-                            contracts: vec![Bytes::from_str(
-                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-                            )
-                            .unwrap()
-                            .0
-                            .to_vec()],
+                            contracts: vec![address_from_str(WETH_ADDRESS)],
                             static_att: vec![Attribute {
                                 name: "key".to_owned(),
                                 value: Bytes::from(600u64).lpad(32, 0).to_vec(),
@@ -701,10 +703,7 @@ pub mod fixtures {
                             }),
                         }],
                         balance_changes: vec![BalanceChange {
-                            token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                .unwrap()
-                                .0
-                                .to_vec(),
+                            token: address_from_str(DAI_ADDRESS),
                             balance: 1_i32.to_le_bytes().to_vec(),
                             component_id: "Balance1".into(),
                         }],
@@ -1041,30 +1040,22 @@ pub mod fixtures {
                                 },
                             ],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 50000000.encode_to_vec(),
+                            }],
                         }],
                         entity_changes: vec![],
                         component_changes: vec![ProtocolComponent {
                             id: "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
                                 .to_owned(),
                             tokens: vec![
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
+                                address_from_str(DAI_ADDRESS),
+                                address_from_str(DAI_ADDRESS),
                             ],
                             contracts: vec![
-                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
-                                Bytes::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
+                                address_from_str(WETH_ADDRESS),
+                                address_from_str(WETH_ADDRESS),
                             ],
                             static_att: vec![
                                 Attribute {
@@ -1087,11 +1078,7 @@ pub mod fixtures {
                             }),
                         }],
                         balance_changes: vec![BalanceChange {
-                            token: hex::decode(
-                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-                                    .trim_start_matches("0x"),
-                            )
-                            .unwrap(),
+                            token: address_from_str(WETH_ADDRESS),
                             balance: 50000000.encode_to_vec(),
                             component_id:
                                 "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
@@ -1125,15 +1112,15 @@ pub mod fixtures {
                                 },
                             ],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 10.encode_to_vec(),
+                            }],
                         }],
                         entity_changes: vec![],
                         component_changes: vec![],
                         balance_changes: vec![BalanceChange {
-                            token: hex::decode(
-                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-                                    .trim_start_matches("0x"),
-                            )
-                            .unwrap(),
+                            token: address_from_str(WETH_ADDRESS),
                             balance: 10.encode_to_vec(),
                             component_id:
                                 "d417ff54652c09bd9f31f216b1a2e5d1e28c1dce1ba840c40d16f2b4d09b5902"
@@ -1157,6 +1144,16 @@ pub mod fixtures {
                             value: Bytes::from("0x01").into(),
                         }],
                         change: ChangeType::Creation.into(),
+                        token_balances: vec![
+                            AccountBalanceChange {
+                                token: address_from_str(WETH_ADDRESS),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                            },
+                            AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                            },
+                        ],
                     }],
                     entity_changes: vec![],
                     component_changes: vec![ProtocolComponent {
@@ -1203,6 +1200,16 @@ pub mod fixtures {
                                 value: Bytes::from("0x02").into(),
                             }],
                             change: ChangeType::Creation.into(),
+                            token_balances: vec![
+                                AccountBalanceChange {
+                                    token: address_from_str(USDT_ADDRESS),
+                                    balance: 20_i32.to_be_bytes().to_vec(),
+                                },
+                                AccountBalanceChange {
+                                    token: address_from_str(USDC_ADDRESS),
+                                    balance: 20_i32.to_be_bytes().to_vec(),
+                                },
+                            ],
                         },
                         ContractChange {
                             address: address_from_str("0000000000000000000000000000000000000001"),
@@ -1219,6 +1226,10 @@ pub mod fixtures {
                                 },
                             ],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 10_i32.to_be_bytes().to_vec(),
+                            }],
                         },
                     ],
                     entity_changes: vec![],
@@ -1276,6 +1287,7 @@ pub mod fixtures {
                                     value: Bytes::from("0x01").into(),
                                 }],
                                 change: ChangeType::Update.into(),
+                                token_balances: vec![],
                             },
                             ContractChange {
                                 address: address_from_str(
@@ -1288,6 +1300,10 @@ pub mod fixtures {
                                     value: Bytes::from("0xc8").into(),
                                 }],
                                 change: ChangeType::Update.into(),
+                                token_balances: vec![AccountBalanceChange {
+                                    token: address_from_str(USDC_ADDRESS),
+                                    balance: 1_i32.to_be_bytes().to_vec(),
+                                }],
                             },
                         ],
                         entity_changes: vec![],
@@ -1309,6 +1325,10 @@ pub mod fixtures {
                                 value: Bytes::from("0x01").into(),
                             }],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 100_i32.to_be_bytes().to_vec(),
+                            }],
                         }],
                         entity_changes: vec![],
                         component_changes: vec![],
@@ -1340,6 +1360,7 @@ pub mod fixtures {
                             value: Bytes::from("0x10").into(),
                         }],
                         change: ChangeType::Update.into(),
+                        token_balances: vec![],
                     }],
                     entity_changes: vec![],
                     component_changes: vec![ProtocolComponent {
@@ -1374,6 +1395,16 @@ pub mod fixtures {
                                 value: Bytes::from("0x10").into(),
                             }],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![
+                                AccountBalanceChange {
+                                    token: address_from_str(USDC_ADDRESS),
+                                    balance: 100_i32.to_be_bytes().to_vec(),
+                                },
+                                AccountBalanceChange {
+                                    token: address_from_str(WETH_ADDRESS),
+                                    balance: 100_i32.to_be_bytes().to_vec(),
+                                },
+                            ],
                         },
                         ContractChange {
                             address: address_from_str("0000000000000000000000000000000000000002"),
@@ -1384,6 +1415,10 @@ pub mod fixtures {
                                 value: Bytes::from("0x10").into(),
                             }],
                             change: ChangeType::Update.into(),
+                            token_balances: vec![AccountBalanceChange {
+                                token: address_from_str(USDC_ADDRESS),
+                                balance: 1_i32.to_be_bytes().to_vec(),
+                            }],
                         },
                     ],
                     entity_changes: vec![],
@@ -1496,21 +1531,10 @@ pub mod fixtures {
                         component_changes: vec![ProtocolComponent {
                             id: "Pool".to_owned(),
                             tokens: vec![
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
-                                Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                    .unwrap()
-                                    .0
-                                    .to_vec(),
+                                address_from_str(DAI_ADDRESS),
+                                address_from_str(DAI_ADDRESS),
                             ],
-                            contracts: vec![Bytes::from_str(
-                                "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-                            )
-                            .unwrap()
-                            .0
-                            .to_vec()],
+                            contracts: vec![address_from_str(WETH_ADDRESS)],
                             static_att: vec![Attribute {
                                 name: "key".to_owned(),
                                 value: Bytes::from(600u64).lpad(32, 0).to_vec(),
@@ -1525,10 +1549,7 @@ pub mod fixtures {
                             }),
                         }],
                         balance_changes: vec![BalanceChange {
-                            token: Bytes::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F")
-                                .unwrap()
-                                .0
-                                .to_vec(),
+                            token: address_from_str(DAI_ADDRESS),
                             balance: 1_i32.to_le_bytes().to_vec(),
                             component_id: "Balance1".into(),
                         }],

@@ -1,23 +1,24 @@
 //! This module contains Tycho Websocket implementation
-
-use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
-use actix_web::{web, Error, HttpRequest, HttpResponse};
-use actix_web_actors::ws;
-use futures03::executor::block_on;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt::Debug,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
+use actix_web::{web, Error, HttpRequest, HttpResponse};
+use actix_web_actors::ws;
+use futures03::executor::block_on;
+use metrics::{counter, gauge};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
-use crate::extractor::{runner::MessageSender, ExtractorMsg};
-
 use tycho_core::models::ExtractorIdentity;
+
+use crate::extractor::{runner::MessageSender, ExtractorMsg};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -78,7 +79,7 @@ impl WsData {
 /// Actor handling a single WS connection
 ///
 /// This actor is responsible for:
-/// - Receiving adn forwarding messages from the extractor
+/// - Receiving and forwarding messages from the extractor
 /// - Receiving and handling commands from the client
 pub struct WsActor {
     id: Uuid,
@@ -87,15 +88,17 @@ pub struct WsActor {
     heartbeat: Instant,
     app_state: web::Data<WsData>,
     subscriptions: HashMap<Uuid, SpawnHandle>,
+    user_identity: Option<String>,
 }
 
 impl WsActor {
-    fn new(app_state: web::Data<WsData>) -> Self {
+    fn new(app_state: web::Data<WsData>, user_identity: Option<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
             heartbeat: Instant::now(),
             app_state,
             subscriptions: HashMap::new(),
+            user_identity,
         }
     }
 
@@ -106,7 +109,37 @@ impl WsActor {
         stream: web::Payload,
         data: web::Data<WsData>,
     ) -> Result<HttpResponse, Error> {
-        ws::start(WsActor::new(data), &req, stream)
+        let user_identity = req
+            .headers()
+            .get("user-identity")
+            .map(|value| {
+                value
+                    .to_str()
+                    .unwrap_or("unknown")
+                    .to_string()
+            });
+        let ws_actor = WsActor::new(data, user_identity);
+
+        // metrics
+        let user_agent = req
+            .headers()
+            .get("user-agent")
+            .map(|value| {
+                value
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .unwrap_or_default();
+        counter!(
+            "websocket_connections_metadata",
+            "id" => ws_actor.id.to_string(),
+            "client_version" => user_agent,
+            "user_identity" => ws_actor.user_identity.clone().unwrap_or("unknown".to_string()),
+        )
+        .increment(1);
+
+        ws::start(ws_actor, &req, stream)
     }
 
     /// Helper method that sends heartbeat ping to client every 5 seconds (HEARTBEAT_INTERVAL)
@@ -117,6 +150,7 @@ impl WsActor {
             // Check client heartbeats
             if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
                 warn!("Websocket Client heartbeat failed, disconnecting!");
+                counter!("websocket_connections_dropped", "reason" => "timeout").increment(1);
                 ctx.stop();
                 return;
             }
@@ -169,6 +203,15 @@ impl WsActor {
                         self.subscriptions
                             .insert(subscription_id, handle);
                         debug!("Added subscription to hashmap");
+                        gauge!("websocket_extractor_subscriptions_active", "subscription_id" => subscription_id.to_string()).increment(1);
+                        counter!(
+                            "websocket_extractor_subscriptions_metadata",
+                            "subscription_id" => subscription_id.to_string(),
+                            "chain"=> extractor_id.chain.to_string(),
+                            "extractor" => extractor_id.name.to_string(),
+                            "user_identity" => self.user_identity.clone().unwrap_or("unknown".to_string()),
+                        )
+                        .increment(1);
 
                         let message = Response::NewSubscription {
                             extractor_id: extractor_id.clone(),
@@ -209,6 +252,7 @@ impl WsActor {
             // Cancel the future of the subscription stream
             ctx.cancel_future(handle);
             debug!("Cancelled subscription future");
+            gauge!("websocket_extractor_subscriptions_active", "subscription_id" => subscription_id.to_string()).decrement(1);
 
             let message = Response::SubscriptionEnded { subscription_id };
             ctx.text(serde_json::to_string(&message).unwrap());
@@ -228,6 +272,8 @@ impl Actor for WsActor {
     fn started(&mut self, ctx: &mut Self::Context) {
         info!("Websocket connection established");
 
+        gauge!("websocket_connections_active", "id" => self.id.to_string()).increment(1);
+
         // Start the heartbeat
         self.heartbeat(ctx);
     }
@@ -236,10 +282,13 @@ impl Actor for WsActor {
     fn stopped(&mut self, ctx: &mut Self::Context) {
         info!("Websocket connection closed");
 
+        gauge!("websocket_connections_active", "id" => self.id.to_string()).decrement(1);
+
         // Close all remaining subscriptions
         for (subscription_id, handle) in self.subscriptions.drain() {
             debug!(subscription_id = ?subscription_id, "Closing subscription.");
             ctx.cancel_future(handle);
+            gauge!("websocket_extractor_subscriptions_active", "subscription_id" => subscription_id.to_string()).decrement(1);
         }
     }
 }
@@ -339,6 +388,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsActor {
             }
             Err(err) => {
                 error!(error = %err, "Failed to receive message from websocket");
+                counter!("websocket_connections_dropped", "reason" => "network_error").increment(1);
                 ctx.stop()
             }
             _ => (),

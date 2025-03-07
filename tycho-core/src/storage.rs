@@ -1,18 +1,21 @@
 //! Storage traits used by Tycho
-use std::{collections::HashMap, fmt::Display};
-
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use std::{collections::HashMap, fmt::Display};
 use thiserror::Error;
 
 use crate::{
     dto,
     models::{
-        self,
         blockchain::{Block, Transaction},
-        protocol::ComponentBalance,
+        contract::{Account, AccountBalance, AccountDelta},
+        protocol::{
+            ComponentBalance, ProtocolComponent, ProtocolComponentState,
+            ProtocolComponentStateDelta,
+        },
+        token::CurrencyToken,
         Address, BlockHash, Chain, ComponentId, ContractId, ExtractionState, PaginationParams,
-        TxHash,
+        ProtocolType, TxHash,
     },
     Bytes,
 };
@@ -226,14 +229,11 @@ pub enum VersionKind {
     /// executed in that block.
     #[default]
     Last,
-
     /// Represents the initial state of a specific block. In other words,
     /// it is the state before any transaction has been executed within that block.
-    #[allow(dead_code)]
     First,
     /// Represents a specific transactions indexed position within a block.
     /// It includes the state after executing the transaction at that index.
-    #[allow(dead_code)]
     Index(i64),
 }
 
@@ -280,7 +280,7 @@ pub trait ProtocolGateway {
         ids: Option<&[&str]>,
         min_tvl: Option<f64>,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<WithTotal<Vec<models::protocol::ProtocolComponent>>, StorageError>;
+    ) -> Result<WithTotal<Vec<ProtocolComponent>>, StorageError>;
 
     /// Retrieves owners of tokens
     ///
@@ -301,14 +301,11 @@ pub trait ProtocolGateway {
         min_balance: Option<f64>,
     ) -> Result<HashMap<Address, (ComponentId, Bytes)>, StorageError>;
 
-    async fn add_protocol_components(
-        &self,
-        new: &[models::protocol::ProtocolComponent],
-    ) -> Result<(), StorageError>;
+    async fn add_protocol_components(&self, new: &[ProtocolComponent]) -> Result<(), StorageError>;
 
     async fn delete_protocol_components(
         &self,
-        to_delete: &[models::protocol::ProtocolComponent],
+        to_delete: &[ProtocolComponent],
         block_ts: NaiveDateTime,
     ) -> Result<(), StorageError>;
 
@@ -321,7 +318,7 @@ pub trait ProtocolGateway {
     /// Ok if stored successfully.
     async fn add_protocol_types(
         &self,
-        new_protocol_types: &[models::ProtocolType],
+        new_protocol_types: &[ProtocolType],
     ) -> Result<(), StorageError>;
 
     /// Retrieve protocol component states
@@ -338,21 +335,21 @@ pub trait ProtocolGateway {
     /// # Parameters
     /// - `chain` The chain of the component
     /// - `system` The protocol system this component belongs to
-    /// - `id` The external id of the component e.g. address, or the pair
+    /// - `ids` The external ids of the components e.g. addresses, or the pairs
     /// - `at` The version at which the state is valid at.
     async fn get_protocol_states(
         &self,
         chain: &Chain,
         at: Option<Version>,
         system: Option<String>,
-        id: Option<&[&str]>,
+        ids: Option<&[&str]>,
         retrieve_balances: bool,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<WithTotal<Vec<models::protocol::ProtocolComponentState>>, StorageError>;
+    ) -> Result<WithTotal<Vec<ProtocolComponentState>>, StorageError>;
 
     async fn update_protocol_states(
         &self,
-        new: &[(TxHash, models::protocol::ProtocolComponentStateDelta)],
+        new: &[(TxHash, ProtocolComponentStateDelta)],
     ) -> Result<(), StorageError>;
 
     /// Retrieves a tokens from storage
@@ -370,7 +367,7 @@ pub trait ProtocolGateway {
         min_quality: Option<i32>,
         traded_n_days_ago: Option<NaiveDateTime>,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<WithTotal<Vec<models::token::CurrencyToken>>, StorageError>;
+    ) -> Result<WithTotal<Vec<CurrencyToken>>, StorageError>;
 
     /// Saves multiple component balances to storage.
     ///
@@ -384,7 +381,7 @@ pub trait ProtocolGateway {
     /// insert.
     async fn add_component_balances(
         &self,
-        component_balances: &[models::protocol::ComponentBalance],
+        component_balances: &[ComponentBalance],
     ) -> Result<(), StorageError>;
 
     /// Saves multiple tokens to storage.
@@ -398,8 +395,7 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn add_tokens(&self, tokens: &[models::token::CurrencyToken])
-        -> Result<(), StorageError>;
+    async fn add_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError>;
 
     /// Updates multiple tokens in storage.
     ///
@@ -413,10 +409,7 @@ pub trait ProtocolGateway {
     /// # Return
     /// Ok if all tokens could be inserted, Err if at least one token failed to
     /// insert.
-    async fn update_tokens(
-        &self,
-        tokens: &[models::token::CurrencyToken],
-    ) -> Result<(), StorageError>;
+    async fn update_tokens(&self, tokens: &[CurrencyToken]) -> Result<(), StorageError>;
 
     /// Retrieve protocol state changes
     ///
@@ -434,7 +427,7 @@ pub trait ProtocolGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<Vec<models::protocol::ProtocolComponentStateDelta>, StorageError>;
+    ) -> Result<Vec<ProtocolComponentStateDelta>, StorageError>;
 
     /// Retrieve protocol component balance changes
     ///
@@ -452,13 +445,13 @@ pub trait ProtocolGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         target_version: &BlockOrTimestamp,
-    ) -> Result<Vec<models::protocol::ComponentBalance>, StorageError>;
+    ) -> Result<Vec<ComponentBalance>, StorageError>;
 
-    async fn get_balances(
+    async fn get_component_balances(
         &self,
         chain: &Chain,
         ids: Option<&[&str]>,
-        at: Option<&Version>,
+        version: Option<&Version>,
     ) -> Result<HashMap<String, HashMap<Bytes, ComponentBalance>>, StorageError>;
 
     async fn get_token_prices(&self, chain: &Chain) -> Result<HashMap<Bytes, f64>, StorageError>;
@@ -468,6 +461,22 @@ pub trait ProtocolGateway {
         chain: &Chain,
         tvl_values: &HashMap<String, f64>,
     ) -> Result<(), StorageError>;
+
+    /// Retrieve a list of actively supported protocol systems
+    ///
+    /// Fetches the list of protocol systems supported by the Tycho indexing service.
+    ///
+    /// # Parameters
+    /// - `chain` The chain for which to retrieve supported protocol systems.
+    /// - `pagination_params` Optional pagination parameters to control the number of results.
+    ///
+    /// # Return
+    /// A paginated list of supported protocol systems, along with the total count.
+    async fn get_protocol_systems(
+        &self,
+        chain: &Chain,
+        pagination_params: Option<&PaginationParams>,
+    ) -> Result<WithTotal<Vec<String>>, StorageError>;
 }
 
 /// Manage contracts and their state in storage.
@@ -490,7 +499,7 @@ pub trait ContractStateGateway {
         id: &ContractId,
         version: Option<&Version>,
         include_slots: bool,
-    ) -> Result<models::contract::Account, StorageError>;
+    ) -> Result<Account, StorageError>;
 
     /// Get multiple contracts' states from storage.
     ///
@@ -518,7 +527,7 @@ pub trait ContractStateGateway {
         version: Option<&Version>,
         include_slots: bool,
         pagination_params: Option<&PaginationParams>,
-    ) -> Result<WithTotal<Vec<models::contract::Account>>, StorageError>;
+    ) -> Result<WithTotal<Vec<Account>>, StorageError>;
 
     /// Inserts a new contract into the database.
     ///
@@ -533,7 +542,7 @@ pub trait ContractStateGateway {
     /// - A Result with Ok if the operation was successful, and an Err containing `StorageError` if
     ///   there was an issue inserting the contract into the database. E.g. if the contract already
     ///   existed.
-    async fn upsert_contract(&self, new: &models::contract::Account) -> Result<(), StorageError>;
+    async fn upsert_contract(&self, new: &Account) -> Result<(), StorageError>;
 
     /// Update multiple contracts
     ///
@@ -557,10 +566,7 @@ pub trait ContractStateGateway {
     /// `StorageError` if there was an issue updating the contracts in the database. E.g. if a
     /// transaction can't be located by it's reference or accounts refer to a different chain then
     /// the one specified.
-    async fn update_contracts(
-        &self,
-        new: &[(TxHash, models::contract::AccountDelta)],
-    ) -> Result<(), StorageError>;
+    async fn update_contracts(&self, new: &[(TxHash, AccountDelta)]) -> Result<(), StorageError>;
 
     /// Mark a contract as deleted
     ///
@@ -622,7 +628,37 @@ pub trait ContractStateGateway {
         chain: &Chain,
         start_version: Option<&BlockOrTimestamp>,
         end_version: &BlockOrTimestamp,
-    ) -> Result<Vec<models::contract::AccountDelta>, StorageError>;
+    ) -> Result<Vec<AccountDelta>, StorageError>;
+
+    /// Saves multiple account balances to storage.
+    ///
+    /// # Parameters
+    /// - `account_balances` The account balances to insert.
+    /// - `chain` The chain of the account balances to be inserted.
+    /// - `block_ts` The timestamp of the block that the balances are associated with.
+    ///
+    /// # Return
+    /// Ok if all account balances could be inserted, Err if at least one token failed to insert.
+    async fn add_account_balances(
+        &self,
+        account_balances: &[AccountBalance],
+    ) -> Result<(), StorageError>;
+
+    /// Retrieve account balances
+    ///
+    /// # Parameters
+    /// - `chain` The chain of the account balances
+    /// - `accounts` The accounts to query for. If set to `None`, it retrieves balances for all
+    ///   indexed
+    ///  accounts in the chain.
+    /// - `version` Version at which to retrieve balances for. If set to `None`, it retrieves the
+    ///   latest balances.
+    async fn get_account_balances(
+        &self,
+        chain: &Chain,
+        accounts: Option<&[Address]>,
+        version: Option<&Version>,
+    ) -> Result<HashMap<Address, HashMap<Address, AccountBalance>>, StorageError>;
 }
 
 pub trait Gateway:

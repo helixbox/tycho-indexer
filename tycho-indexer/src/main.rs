@@ -1,10 +1,4 @@
 #![doc = include_str!("../../README.md")]
-
-use actix_web::dev::ServerHandle;
-use chrono::{NaiveDateTime, Utc};
-use clap::Parser;
-use futures03::future::select_all;
-use serde::Deserialize;
 use std::{
     collections::HashMap,
     fs::File,
@@ -13,8 +7,14 @@ use std::{
     str::FromStr,
     sync::{mpsc, Arc},
 };
-use tokio::{runtime::Handle, select, task::JoinHandle};
 
+use actix_web::{dev::ServerHandle, web, App, HttpResponse, HttpServer, Responder};
+use chrono::{NaiveDateTime, Utc};
+use clap::Parser;
+use futures03::future::select_all;
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use serde::Deserialize;
+use tokio::{runtime::Handle, select, task::JoinHandle};
 use tracing::{debug, error, info, instrument, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -50,7 +50,6 @@ use tycho_storage::postgres::{builder::GatewayBuilder, cache::CachedGateway};
 mod ot;
 
 // TODO: We need to use `use pretty_assertions::{assert_eq, assert_ne}` per test module.
-#[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
@@ -116,6 +115,41 @@ fn create_tracing_subscriber() {
     }
 }
 
+/// Creates and runs the Prometheus metrics exporter using Actix Web.
+pub fn create_metrics_exporter() -> tokio::task::JoinHandle<()> {
+    let exporter_builder = PrometheusBuilder::new();
+    let handle = exporter_builder
+        .install_recorder()
+        .expect("Failed to install Prometheus recorder");
+
+    tokio::spawn(async move {
+        if let Err(e) = HttpServer::new(move || {
+            App::new().route(
+                "/metrics",
+                web::get().to({
+                    let handle = handle.clone();
+                    move || metrics_handler(handle.clone())
+                }),
+            )
+        })
+        .bind(("0.0.0.0", 9898))
+        .expect("Failed to bind metrics server")
+        .run()
+        .await
+        {
+            error!("Metrics server failed: {}", e);
+        }
+    })
+}
+
+/// Handles requests to the /metrics endpoint, rendering Prometheus metrics.
+async fn metrics_handler(handle: PrometheusHandle) -> impl Responder {
+    let metrics = handle.render();
+    HttpResponse::Ok()
+        .content_type("text/plain; version=0.0.4; charset=utf-8")
+        .body(metrics)
+}
+
 /// Executes all extractors configured in the extractor configuration file and starts the server.
 ///
 /// Note: This function utilizes two distinct runtimes: one for extraction tasks and another
@@ -151,6 +185,8 @@ fn run_indexer(global_args: GlobalArgs, index_args: IndexArgs) -> Result<(), Ext
     let (extraction_tasks, other_tasks) = main_runtime
         .block_on(async {
             create_tracing_subscriber();
+            let _metrics_task = create_metrics_exporter();
+
             info!("Starting Tycho");
             debug!("{} CPUs detected", num_cpus::get());
             let extractors_config = ExtractorConfigs::from_yaml(&index_args.extractors_config)

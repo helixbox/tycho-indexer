@@ -1,10 +1,10 @@
-use std::{str::FromStr, time::Duration};
+use std::{collections::HashSet, str::FromStr, time::Duration};
 
 use clap::Parser;
 use tracing::{debug, info};
 use tracing_appender::rolling;
 
-use tycho_core::dto::{Chain, ExtractorIdentity};
+use tycho_core::dto::{Chain, ExtractorIdentity, PaginationParams, ProtocolSystemsRequestBody};
 
 use crate::{
     deltas::DeltasClient,
@@ -12,6 +12,7 @@ use crate::{
         component_tracker::ComponentFilter, synchronizer::ProtocolStateSynchronizer,
         BlockSynchronizer,
     },
+    rpc::RPCClient,
     HttpRPCClient, WsDeltasClient,
 };
 
@@ -168,7 +169,6 @@ pub async fn run_cli() {
     run(exchanges, args).await;
 }
 
-#[allow(deprecated)]
 async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     //TODO: remove "or args.auth_key.is_none()" when our internal client use the no_tls flag
     let (tycho_ws_url, tycho_rpc_url) = if args.no_tls || args.auth_key.is_none() {
@@ -184,6 +184,9 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
     };
 
     let ws_client = WsDeltasClient::new(&tycho_ws_url, args.auth_key.as_deref()).unwrap();
+    let rpc_client = HttpRPCClient::new(&tycho_rpc_url, args.auth_key.as_deref()).unwrap();
+    let chain =
+        Chain::from_str(&args.chain).unwrap_or_else(|_| panic!("Unknown chain {}", &args.chain));
     let ws_jh = ws_client
         .connect()
         .await
@@ -198,13 +201,34 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
         block_sync.max_messages(*mm);
     }
 
+    let available_protocols_set = rpc_client
+        .get_protocol_systems(&ProtocolSystemsRequestBody {
+            chain,
+            pagination: PaginationParams { page: 0, page_size: 100 },
+        })
+        .await
+        .unwrap()
+        .protocol_systems
+        .into_iter()
+        .collect::<HashSet<_>>();
+
+    let requested_protocol_set = exchanges
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<HashSet<_>>();
+
+    let not_requested_protocols = available_protocols_set
+        .difference(&requested_protocol_set)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if !not_requested_protocols.is_empty() {
+        tracing::info!("Other available protocols: {}", not_requested_protocols.join(", "));
+    }
+
     for (name, address) in exchanges {
         debug!("Registering exchange: {}", name);
-        let id = ExtractorIdentity {
-            chain: Chain::from_str(&args.chain)
-                .unwrap_or_else(|_| panic!("Unknown chain {}", &args.chain)),
-            name: name.clone(),
-        };
+        let id = ExtractorIdentity { chain, name: name.clone() };
         let filter = if address.is_some() {
             ComponentFilter::Ids(vec![address.unwrap()])
         } else if let (Some(remove_tvl), Some(add_tvl)) =
@@ -220,7 +244,7 @@ async fn run(exchanges: Vec<(String, Option<String>)>, args: CliArgs) {
             filter,
             3,
             !args.no_state,
-            HttpRPCClient::new(&tycho_rpc_url, args.auth_key.as_deref()).unwrap(),
+            rpc_client.clone(),
             ws_client.clone(),
         );
         block_sync = block_sync.register_synchronizer(id, sync);

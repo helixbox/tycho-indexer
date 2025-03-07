@@ -1,1 +1,1 @@
-echo $(aws s3 presign s3://repo.propellerheads/substreams/$1)
+echo $(aws s3 presign s3://repo.propellerheads-propellerheads/substreams/$1)

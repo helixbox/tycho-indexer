@@ -54,9 +54,11 @@ pub fn transcode_ambient_balances(mut changes: BlockChanges) -> BlockChanges {
     changes
 }
 
-/// This post processor allow us to ignore any balance change if the component id and the token are
-/// the same. We had to add this for Balancer because when a EulerLinearPool is created it returns
-/// the minted pool tokens in the balance changes.
+/// This post processor allow us to ignore any component balance change if the component id and the
+/// token are the same.
+///
+/// We had to add this for Balancer because when a EulerLinearPool is created it returns the minted
+/// pool tokens in the balance changes.
 /// TODO: look into this and see if we can fix it on the substreams side.
 pub fn ignore_self_balances(mut changes: BlockChanges) -> BlockChanges {
     changes
@@ -96,13 +98,13 @@ pub fn transcode_usv2_balances(mut changes: BlockChanges) -> BlockChanges {
     changes
 }
 
-#[allow(deprecated)]
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, str::FromStr};
 
     use tycho_core::models::{
         blockchain::{Transaction, TxWithChanges},
+        contract::AccountBalance,
         protocol::ComponentBalance,
         Chain,
     };
@@ -161,6 +163,31 @@ mod tests {
                     ),
                 ]),
             )]),
+            account_balance_changes: HashMap::from([(
+                Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                HashMap::from([
+                    (
+                        Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
+                        AccountBalance {
+                            token: Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                            account: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        },
+                    ),
+                    (
+                        Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        AccountBalance {
+                            token: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                            account: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        },
+                    ),
+                ]),
+            )]),
             tx: Transaction::new(
                 Bytes::zero(32),
                 Bytes::zero(32),
@@ -180,6 +207,7 @@ mod tests {
             txs_with_update.clone(),
         );
 
+        // expected to skip itself as a component balance, but still track it as an account balance
         let expected = BlockChanges::new(
             "test".to_string(),
             Chain::Ethereum,
@@ -203,6 +231,31 @@ mod tests {
                         },
                     )]),
                 )]),
+            account_balance_changes: HashMap::from([(
+                Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                HashMap::from([
+                    (
+                        Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716").unwrap(),
+                        AccountBalance {
+                            token: Bytes::from_str("0xeb91861f8a4e1c12333f42dce8fb0ecdc28da716")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                            account: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        },
+                    ),
+                    (
+                        Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        AccountBalance {
+                            token: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399")
+                                .unwrap(),
+                            balance: Bytes::from(0_i32.to_le_bytes()),
+                            modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000011121314").unwrap(),
+                            account: Bytes::from_str("0xd4e7c1f3da1144c9e2cfd1b015eda7652b4a4399").unwrap(),
+                        },
+                    ),
+                ]),
+            )]),
                 tx: Transaction::new(
                     Bytes::zero(32),
                     Bytes::zero(32),

@@ -2,10 +2,7 @@ pub use ethrpc::{
     create_env_test_transport, create_test_transport, Web3, Web3CallBatch, Web3Transport,
 };
 use reqwest::Url;
-use std::{
-    fmt::{self, Display, Formatter},
-    time::Duration,
-};
+use std::{fmt, time::Duration};
 
 use super::http_client::HttpClientFactory;
 
@@ -31,8 +28,8 @@ pub struct Arguments {
     pub ethrpc_batch_delay: Duration,
 }
 
-impl Display for Arguments {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl fmt::Display for Arguments {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self { ethrpc_max_batch_size, ethrpc_max_concurrent_requests, ethrpc_batch_delay } =
             self;
 

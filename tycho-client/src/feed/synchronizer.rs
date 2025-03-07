@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -38,7 +38,6 @@ pub type SyncResult<T> = anyhow::Result<T>;
 #[derive(Clone)]
 pub struct ProtocolStateSynchronizer<R: RPCClient, D: DeltasClient> {
     extractor_id: ExtractorIdentity,
-    #[allow(dead_code)]
     retrieve_balances: bool,
     rpc_client: R,
     deltas_client: D,
@@ -54,13 +53,13 @@ struct SharedState {
     last_synced_block: Option<Header>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ComponentWithState {
     pub state: ResponseProtocolState,
     pub component: ProtocolComponent,
 }
 
-#[derive(Clone, PartialEq, Debug, Default, Serialize)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct Snapshot {
     states: HashMap<String, ComponentWithState>,
     vm_storage: HashMap<Bytes, ResponseAccount>,
@@ -81,7 +80,7 @@ impl Snapshot {
     }
 }
 
-#[derive(Clone, PartialEq, Debug, Default, Serialize)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct StateSyncMessage {
     /// The block information for this update.
     pub header: Header,
@@ -147,7 +146,6 @@ where
     D: DeltasClient + Clone + Send + Sync + 'static,
 {
     /// Creates a new state synchronizer.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         extractor_id: ExtractorIdentity,
         retrieve_balances: bool,
@@ -226,7 +224,7 @@ where
                 &self.extractor_id.name,
                 self.retrieve_balances,
                 &version,
-                50,
+                100,
                 4,
             )
             .await?
@@ -269,7 +267,7 @@ where
                     ids.as_slice(),
                     &self.extractor_id.name,
                     &version,
-                    50,
+                    100,
                     4,
                 )
                 .await?
@@ -537,7 +535,8 @@ mod test {
     use tycho_core::dto::{
         Block, Chain, PaginationResponse, ProtocolComponentRequestResponse,
         ProtocolComponentsRequestBody, ProtocolStateRequestBody, ProtocolStateRequestResponse,
-        StateRequestBody, StateRequestResponse, TokensRequestBody, TokensRequestResponse,
+        ProtocolSystemsRequestBody, ProtocolSystemsRequestResponse, StateRequestBody,
+        StateRequestResponse, TokensRequestBody, TokensRequestResponse,
     };
 
     use crate::{deltas::MockDeltasClient, rpc::MockRPCClient, DeltasError, RPCError};
@@ -586,6 +585,15 @@ mod test {
         ) -> Result<ProtocolStateRequestResponse, RPCError> {
             self.0
                 .get_protocol_states(request)
+                .await
+        }
+
+        async fn get_protocol_systems(
+            &self,
+            request: &ProtocolSystemsRequestBody,
+        ) -> Result<ProtocolSystemsRequestResponse, RPCError> {
+            self.0
+                .get_protocol_systems(request)
                 .await
         }
     }

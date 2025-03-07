@@ -5,16 +5,12 @@
 //!
 //! Structs in here implement utoipa traits so they can be used to derive an OpenAPI schema.
 #![allow(deprecated)]
+use chrono::{NaiveDateTime, Utc};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
-};
-
-use chrono::{NaiveDateTime, Utc};
-use serde::{
-    de::{self, MapAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
 };
 use strum_macros::{Display, EnumString};
 use utoipa::{IntoParams, ToSchema};
@@ -22,7 +18,6 @@ use uuid::Uuid;
 
 use crate::{
     models,
-    models::{contract::Account, token::CurrencyToken},
     serde_primitives::{
         hex_bytes, hex_bytes_option, hex_hashmap_key, hex_hashmap_key_value, hex_hashmap_value,
     },
@@ -51,16 +46,22 @@ pub enum Chain {
     Starknet,
     ZkSync,
     Arbitrum,
+    Base,
 }
 
 impl From<models::contract::Account> for ResponseAccount {
-    fn from(value: Account) -> Self {
+    fn from(value: models::contract::Account) -> Self {
         ResponseAccount::new(
             value.chain.into(),
             value.address,
             value.title,
             value.slots,
             value.native_balance,
+            value
+                .token_balances
+                .into_iter()
+                .map(|(k, v)| (k, v.balance))
+                .collect(),
             value.code,
             value.code_hash,
             value.balance_modify_tx,
@@ -77,11 +78,14 @@ impl From<models::Chain> for Chain {
             models::Chain::Starknet => Chain::Starknet,
             models::Chain::ZkSync => Chain::ZkSync,
             models::Chain::Arbitrum => Chain::Arbitrum,
+            models::Chain::Base => Chain::Base,
         }
     }
 }
 
-#[derive(Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(
+    Debug, PartialEq, Default, Copy, Clone, Deserialize, Serialize, ToSchema, EnumString, Display,
+)]
 pub enum ChangeType {
     #[default]
     Update,
@@ -208,7 +212,6 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(hash: Bytes, block_hash: Bytes, from: Bytes, to: Option<Bytes>, index: u64) -> Self {
         Self { hash, block_hash, from, to, index }
     }
@@ -231,6 +234,7 @@ pub struct BlockChanges {
     pub new_protocol_components: HashMap<String, ProtocolComponent>,
     pub deleted_protocol_components: HashMap<String, ProtocolComponent>,
     pub component_balances: HashMap<String, TokenBalances>,
+    pub account_balances: HashMap<Bytes, HashMap<Bytes, AccountBalance>>,
     pub component_tvl: HashMap<String, f64>,
 }
 
@@ -247,6 +251,7 @@ impl BlockChanges {
         new_protocol_components: HashMap<String, ProtocolComponent>,
         deleted_protocol_components: HashMap<String, ProtocolComponent>,
         component_balances: HashMap<String, HashMap<Bytes, ComponentBalance>>,
+        account_balances: HashMap<Bytes, HashMap<Bytes, AccountBalance>>,
     ) -> Self {
         BlockChanges {
             extractor: extractor.to_owned(),
@@ -263,6 +268,7 @@ impl BlockChanges {
                 .into_iter()
                 .map(|(k, v)| (k, v.into()))
                 .collect(),
+            account_balances,
             component_tvl: HashMap::new(),
         }
     }
@@ -302,6 +308,16 @@ impl BlockChanges {
                     .or_insert_with(|| v);
             });
 
+        other
+            .account_balances
+            .into_iter()
+            .for_each(|(k, v)| {
+                self.account_balances
+                    .entry(k)
+                    .and_modify(|e| e.extend(v.clone()))
+                    .or_insert(v);
+            });
+
         self.component_tvl
             .extend(other.component_tvl);
         self.new_protocol_components
@@ -334,6 +350,8 @@ impl BlockChanges {
     pub fn filter_by_contract<F: Fn(&Bytes) -> bool>(&mut self, keep: F) {
         self.account_updates
             .retain(|k, _| keep(k));
+        self.account_balances
+            .retain(|k, _| keep(k));
     }
 
     pub fn n_changes(&self) -> usize {
@@ -360,7 +378,6 @@ pub struct AccountUpdate {
 }
 
 impl AccountUpdate {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         address: Bytes,
         chain: Chain,
@@ -593,22 +610,25 @@ pub struct ResponseAccount {
     #[schema(value_type=HashMap<String, String>, example=json!({"0x....": "0x...."}))]
     #[serde(with = "hex_hashmap_key_value")]
     pub slots: HashMap<Bytes, Bytes>,
-    #[schema(value_type=HashMap<String, String>, example="0x00")]
+    #[schema(value_type=String, example="0x00")]
     #[serde(with = "hex_bytes")]
     pub native_balance: Bytes,
-    #[schema(value_type=HashMap<String, String>, example="0xBADBABE")]
+    #[schema(value_type=HashMap<String, String>, example=json!({"0x....": "0x...."}))]
+    #[serde(with = "hex_hashmap_key_value")]
+    pub token_balances: HashMap<Bytes, Bytes>,
+    #[schema(value_type=String, example="0xBADBABE")]
     #[serde(with = "hex_bytes")]
     pub code: Bytes,
-    #[schema(value_type=HashMap<String, String>, example="0x123456789")]
+    #[schema(value_type=String, example="0x123456789")]
     #[serde(with = "hex_bytes")]
     pub code_hash: Bytes,
-    #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
+    #[schema(value_type=String, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes")]
     pub balance_modify_tx: Bytes,
-    #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
+    #[schema(value_type=String, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes")]
     pub code_modify_tx: Bytes,
-    #[schema(value_type=HashMap<String, String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
+    #[schema(value_type=Option<String>, example="0x8f1133bfb054a23aedfe5d25b1d81b96195396d8b88bd5d4bcf865fc1ae2c3f4")]
     #[serde(with = "hex_bytes_option")]
     pub creation_tx: Option<Bytes>,
 }
@@ -621,6 +641,7 @@ impl ResponseAccount {
         title: String,
         slots: HashMap<Bytes, Bytes>,
         native_balance: Bytes,
+        token_balances: HashMap<Bytes, Bytes>,
         code: Bytes,
         code_hash: Bytes,
         balance_modify_tx: Bytes,
@@ -633,6 +654,7 @@ impl ResponseAccount {
             title,
             slots,
             native_balance,
+            token_balances,
             code,
             code_hash,
             balance_modify_tx,
@@ -651,6 +673,7 @@ impl fmt::Debug for ResponseAccount {
             .field("title", &self.title)
             .field("slots", &self.slots)
             .field("native_balance", &self.native_balance)
+            .field("token_balances", &self.token_balances)
             .field("code", &format!("[{} bytes]", self.code.len()))
             .field("code_hash", &self.code_hash)
             .field("balance_modify_tx", &self.balance_modify_tx)
@@ -658,6 +681,18 @@ impl fmt::Debug for ResponseAccount {
             .field("creation_tx", &self.creation_tx)
             .finish()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct AccountBalance {
+    #[serde(with = "hex_bytes")]
+    pub account: Bytes,
+    #[serde(with = "hex_bytes")]
+    pub token: Bytes,
+    #[serde(with = "hex_bytes")]
+    pub balance: Bytes,
+    #[serde(with = "hex_bytes")]
+    pub modify_tx: Bytes,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
@@ -851,7 +886,7 @@ pub struct ResponseToken {
 }
 
 impl From<models::token::CurrencyToken> for ResponseToken {
-    fn from(value: CurrencyToken) -> Self {
+    fn from(value: models::token::CurrencyToken) -> Self {
         Self {
             chain: value.chain.into(),
             address: value.address,
@@ -1093,7 +1128,7 @@ impl<'de> Deserialize<'de> for ProtocolStateRequestBody {
 
         struct ProtocolStateRequestBodyVisitor;
 
-        impl<'de> Visitor<'de> for ProtocolStateRequestBodyVisitor {
+        impl<'de> de::Visitor<'de> for ProtocolStateRequestBodyVisitor {
             type Value = ProtocolStateRequestBody;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -1102,7 +1137,7 @@ impl<'de> Deserialize<'de> for ProtocolStateRequestBody {
 
             fn visit_map<V>(self, mut map: V) -> Result<ProtocolStateRequestBody, V::Error>
             where
-                V: MapAccess<'de>,
+                V: de::MapAccess<'de>,
             {
                 let mut protocol_ids = None;
                 let mut protocol_system = None;
@@ -1205,6 +1240,28 @@ pub enum Health {
     Ready,
     Starting(String),
     NotReady(String),
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, ToSchema, Eq, Hash, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ProtocolSystemsRequestBody {
+    #[serde(default)]
+    pub chain: Chain,
+    /// Max page size supported is 100
+    #[serde(default)]
+    pub pagination: PaginationParams,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ToSchema, Eq, Hash)]
+pub struct ProtocolSystemsRequestResponse {
+    pub protocol_systems: Vec<String>,
+    pub pagination: PaginationResponse,
+}
+
+impl ProtocolSystemsRequestResponse {
+    pub fn new(protocol_systems: Vec<String>, pagination: PaginationResponse) -> Self {
+        Self { protocol_systems, pagination }
+    }
 }
 
 #[cfg(test)]
@@ -1496,7 +1553,7 @@ mod test {
         assert_eq!(request_body.protocol_ids, Some(expected_ids));
     }
 
-    fn create_models_block_entity_changes() -> crate::models::blockchain::BlockAggregatedChanges {
+    fn create_models_block_changes() -> crate::models::blockchain::BlockAggregatedChanges {
         let base_ts = 1694534400; // Example base timestamp for 2023-09-14T00:00:00
 
         crate::models::blockchain::BlockAggregatedChanges {
@@ -1574,6 +1631,16 @@ mod test {
                     }),
                 ])),
             ]),
+            account_balances: HashMap::from([
+                (Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(), HashMap::from([
+                    (Bytes::from_str("0x7a250d5630b4cf539739df2c5dacb4c659f2488d").unwrap(), models::contract::AccountBalance {
+                        account: Bytes::from_str("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
+                        token: Bytes::from_str("0x7a250d5630b4cf539739df2c5dacb4c659f2488d").unwrap(),
+                        balance: Bytes::from("0x000003e8"),
+                        modify_tx: Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000007531").unwrap(),
+                    }),
+                    ])),
+            ]),
             component_tvl: HashMap::new(),
             account_deltas: Default::default(),
         }
@@ -1585,7 +1652,7 @@ mod test {
         // dto::BlockChanges.
 
         // Create a models::BlockAggregatedChanges instance
-        let block_entity_changes = create_models_block_entity_changes();
+        let block_entity_changes = create_models_block_changes();
 
         // Serialize the struct into JSON
         let json_data = serde_json::to_string(&block_entity_changes).expect("Failed to serialize");
@@ -1653,6 +1720,16 @@ mod test {
                             "component_id": "protocol_1"
                         }
                     }
+            },
+            "account_balances": {
+                "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                        "account": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                        "token": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                        "balance": "0x01f4",
+                        "modify_tx": "0x01"
+                    }
+                }
             },
             "component_tvl": {
                 "protocol_1": 1000.0
@@ -1727,6 +1804,16 @@ mod test {
                         "balance_float": 1.270062661329837E21,
                         "modify_tx": "0xe46c4db085fb6c6f3408a65524555797adb264e1d5cf3b66ad154598f85ac4bf",
                         "component_id": "0x99c59000f5a76c54c4fd7d82720c045bdcf1450d"
+                        }
+                    }
+                },
+                "account_balances": {
+                    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                        "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+                            "account": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                            "token": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                            "balance": "0x01f4",
+                            "modify_tx": "0x01"
                         }
                     }
                 },
@@ -1904,6 +1991,7 @@ mod test {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
+            HashMap::new(),
         );
 
         let block_account_changes_new = BlockChanges::new(
@@ -1913,6 +2001,7 @@ mod test {
             0,
             true,
             new_account_updates,
+            HashMap::new(),
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
@@ -1948,6 +2037,7 @@ mod test {
             0,
             true,
             expected_account_updates,
+            HashMap::new(),
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),

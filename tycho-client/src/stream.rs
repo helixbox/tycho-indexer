@@ -1,9 +1,13 @@
-use std::{collections::HashMap, env, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tracing::info;
 
-use tycho_core::dto::{Chain, ExtractorIdentity};
+use tycho_core::dto::{Chain, ExtractorIdentity, PaginationParams, ProtocolSystemsRequestBody};
 
 use crate::{
     deltas::DeltasClient,
@@ -11,6 +15,7 @@ use crate::{
         component_tracker::ComponentFilter, synchronizer::ProtocolStateSynchronizer,
         BlockSynchronizer, FeedMessage,
     },
+    rpc::RPCClient,
     HttpRPCClient, WsDeltasClient,
 };
 
@@ -61,6 +66,7 @@ impl TychoStreamBuilder {
             Chain::Starknet => (30, 5),
             Chain::ZkSync => (1, 2),
             Chain::Arbitrum => (1, 0), // Typically closer to 0.25s
+            Chain::Base => (10, 2),
         }
     }
 
@@ -134,6 +140,7 @@ impl TychoStreamBuilder {
 
         // Initialize the WebSocket client
         let ws_client = WsDeltasClient::new(&tycho_ws_url, auth_key.as_deref()).unwrap();
+        let rpc_client = HttpRPCClient::new(&tycho_rpc_url, auth_key.as_deref()).unwrap();
         let ws_jh = ws_client
             .connect()
             .await
@@ -145,6 +152,32 @@ impl TychoStreamBuilder {
             Duration::from_secs(self.timeout),
         );
 
+        let available_protocols_set = rpc_client
+            .get_protocol_systems(&ProtocolSystemsRequestBody {
+                chain: self.chain,
+                pagination: PaginationParams { page: 0, page_size: 100 },
+            })
+            .await
+            .unwrap()
+            .protocol_systems
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        let requested_protocol_set = self
+            .exchanges
+            .keys()
+            .cloned()
+            .collect::<HashSet<_>>();
+
+        let not_requested_protocols = available_protocols_set
+            .difference(&requested_protocol_set)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !not_requested_protocols.is_empty() {
+            tracing::info!("Other available protocols: {}", not_requested_protocols.join(", "));
+        }
+
         // Register each exchange with the BlockSynchronizer
         for (name, filter) in self.exchanges {
             info!("Registering exchange: {}", name);
@@ -155,7 +188,7 @@ impl TychoStreamBuilder {
                 filter,
                 3,
                 !self.no_state,
-                HttpRPCClient::new(&tycho_rpc_url, auth_key.as_deref()).unwrap(),
+                rpc_client.clone(),
                 ws_client.clone(),
             );
             block_sync = block_sync.register_synchronizer(id, sync);

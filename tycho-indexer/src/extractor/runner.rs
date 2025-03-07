@@ -4,6 +4,7 @@ use anyhow::{format_err, Context, Result};
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
+use metrics::gauge;
 use prost::Message;
 use serde::Deserialize;
 use tokio::{
@@ -132,6 +133,7 @@ impl ExtractorRunner {
             runtime_handle,
         }
     }
+
     pub fn run(mut self) -> JoinHandle<Result<(), ExtractionError>> {
         let runtime = self
             .runtime_handle
@@ -173,6 +175,15 @@ impl ExtractorRunner {
                             Some(Ok(BlockResponse::New(data))) => {
                                 let block_number = data.clock.as_ref().map(|v| v.number).unwrap_or(0);
                                 tracing::Span::current().record("block_number", block_number);
+                                gauge!(
+                                    "extractor_current_block_number", 
+                                    "chain" => id.chain.to_string(), 
+                                    "extractor" => id.name.to_string()
+                                ).set(block_number as f64);
+
+                                // Start measuring block processing time
+                                let start_time = std::time::Instant::now();
+
                                 // TODO: change interface to take a reference to avoid this clone
                                 match self.extractor.handle_tick_scoped_data(data.clone()).await {
                                     Ok(Some(msg)) => {
@@ -188,6 +199,13 @@ impl ExtractorRunner {
                                         return Err(err);
                                     }
                                 }
+
+                                let duration = start_time.elapsed();
+                                gauge!(
+                                    "block_processing_time_ms", 
+                                    "chain" => id.chain.to_string(), 
+                                    "extractor" => id.name.to_string()
+                                ).set(duration.as_millis() as f64);
                             }
                             Some(Ok(BlockResponse::Undo(undo_signal))) => {
                                 info!(block=?&undo_signal.last_valid_block,  "Revert requested!");
@@ -358,7 +376,6 @@ impl ExtractorBuilder {
         }
     }
 
-    #[allow(dead_code)]
     pub fn endpoint_url(mut self, val: &str) -> Self {
         val.clone_into(&mut self.endpoint_url);
         self
@@ -374,7 +391,6 @@ impl ExtractorBuilder {
         self
     }
 
-    #[allow(dead_code)]
     pub fn token(mut self, val: &str) -> Self {
         val.clone_into(&mut self.token);
         self
@@ -518,6 +534,7 @@ impl ExtractorBuilder {
             self.config.start_block,
             self.config.stop_block.unwrap_or(0) as u64,
             self.final_block_only,
+            extractor.get_id().to_string(),
         );
 
         let id = extractor.get_id();
@@ -573,13 +590,11 @@ async fn download_file_from_s3(
 
 #[cfg(test)]
 mod test {
-    use serde::{Deserialize, Serialize};
-    use tracing::info_span;
-
     use super::*;
 
-    use crate::extractor::MockExtractor;
+    use serde::Serialize;
 
+    use crate::extractor::MockExtractor;
     use tycho_core::models::NormalisedMessage;
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -590,12 +605,6 @@ mod test {
     impl std::fmt::Display for DummyMessage {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{}", self.extractor_id)
-        }
-    }
-
-    impl DummyMessage {
-        pub fn new(extractor_id: ExtractorIdentity) -> Self {
-            Self { extractor_id }
         }
     }
 
@@ -611,45 +620,6 @@ mod test {
 
         fn as_any(&self) -> &dyn std::any::Any {
             self
-        }
-    }
-
-    pub struct MyMessageSender {
-        extractor_id: ExtractorIdentity,
-    }
-
-    impl MyMessageSender {
-        #[allow(dead_code)]
-        pub fn new(extractor_id: ExtractorIdentity) -> Self {
-            Self { extractor_id }
-        }
-    }
-
-    #[async_trait]
-    impl MessageSender for MyMessageSender {
-        async fn subscribe(&self) -> Result<Receiver<ExtractorMsg>, SendError<ControlMessage>> {
-            let (tx, rx) = mpsc::channel::<ExtractorMsg>(1);
-            let extractor_id = self.extractor_id.clone();
-
-            // Spawn a task that sends a DummyMessage every 100ms
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    debug!("Sending DummyMessage");
-                    let dummy_message = DummyMessage::new(extractor_id.clone());
-                    if tx
-                        .send(Arc::new(dummy_message))
-                        .await
-                        .is_err()
-                    {
-                        debug!("Receiver dropped");
-                        break;
-                    }
-                }
-                .instrument(info_span!("DummyMessageSender", extractor_id = %extractor_id))
-            });
-
-            Ok(rx)
         }
     }
 

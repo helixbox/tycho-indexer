@@ -61,23 +61,6 @@ impl EthereumTokenPreProcessor {
     }
 }
 
-/// Map a protocol system into its vault
-/// TODO: This is a hack until we can use the `balance_owner` attribute. Needs to be fixed once we
-/// emit this attribute for every protocol in Substreams
-pub fn map_vault(protocol_system: &str) -> Option<Bytes> {
-    match protocol_system {
-        "vm:balancer" => Some(
-            Bytes::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8")
-                .expect("Unable to convert vault address into H160"),
-        ),
-        "vm:ambient" => Some(
-            Bytes::from_str("0xaaaaaaaaa24eeeb8d57d431224f73832bc34f688")
-                .expect("Unable to convert vault address into H160"),
-        ),
-        _ => None,
-    }
-}
-
 #[async_trait]
 impl TokenPreProcessor for EthereumTokenPreProcessor {
     #[instrument(skip_all, fields(n_addresses=addresses.len(), block = ?block))]

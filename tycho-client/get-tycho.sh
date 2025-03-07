@@ -50,14 +50,14 @@ fi
 
 VERSION=$1
 if [ -z "$VERSION" ]; then
-  FNAME=$(aws s3 ls "s3://repo.propellerheads/tycho-client/tycho-client-${ARCH}" | grep -v 'pre' | sort -k1,2 | tail -n1 | awk '{print $4}')
+  FNAME=$(aws s3 ls "s3://repo.propellerheads-propellerheads/tycho-client/tycho-client-${ARCH}" | grep -v 'pre' | sort -k1,2 | tail -n1 | awk '{print $4}')
   echo "installing latest version: ${FNAME}"
 else
   FNAME="tycho-client-${ARCH}-${OS}-${VERSION}.tar.gz"
   echo "installing version: ${FNAME}"
 fi
 
-RELEASE="s3://repo.propellerheads/tycho-client/${FNAME}"
+RELEASE="s3://repo.propellerheads-propellerheads/tycho-client/${FNAME}"
 aws s3 cp $RELEASE - | tar -xz
 xattr -d com.apple.quarantine tycho-client 2>/dev/null || true
 chmod +x tycho-client

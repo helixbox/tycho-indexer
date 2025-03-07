@@ -14,7 +14,8 @@ pub(crate) enum ComponentFilterVariant {
     /// MinimumTVLRange is a tuple of (remove_tvl_threshold, add_tvl_threshold). Components that
     /// drop below the remove threshold will be removed from tracking, components that exceed the
     /// add threshold will be added. This helps buffer against components that fluctuate on the
-    /// tvl threshold boundary.
+    /// tvl threshold boundary. The thresholds are denominated in native token of the chain, for
+    /// example 1 means 1 ETH on ethereum.
     MinimumTVLRange((f64, f64)),
 }
 
@@ -24,13 +25,33 @@ pub struct ComponentFilter {
 }
 
 impl ComponentFilter {
+    /// Creates a `ComponentFilter` that filters components based on a minimum Total Value Locked
+    /// (TVL) threshold.
+    ///
+    /// # Arguments
+    ///
+    /// * `min_tvl` - The minimum TVL required for a component to be tracked. This is denominated in
+    ///   native token of the chain.
     #[allow(non_snake_case)] // for backwards compatibility
     #[deprecated(since = "0.9.2", note = "Please use with_tvl_range instead")]
     pub fn MinimumTVL(min_tvl: f64) -> ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::MinimumTVLRange((min_tvl, min_tvl)) }
     }
 
-    #[allow(non_snake_case)]
+    /// Creates a `ComponentFilter` with a specified TVL range for adding or removing components
+    /// from tracking.
+    ///
+    /// Components that drop below the `remove_tvl_threshold` will be removed from tracking,
+    /// while components that exceed the `add_tvl_threshold` will be added to tracking.
+    /// This approach helps to reduce fluctuations caused by components hovering around a single
+    /// threshold.
+    ///
+    /// # Arguments
+    ///
+    /// * `remove_tvl_threshold` - The TVL below which a component will be removed from tracking.
+    /// * `add_tvl_threshold` - The TVL above which a component will be added to tracking.
+    ///
+    /// Note: thresholds are denominated in native token of the chain.
     pub fn with_tvl_range(remove_tvl_threshold: f64, add_tvl_threshold: f64) -> ComponentFilter {
         ComponentFilter {
             variant: ComponentFilterVariant::MinimumTVLRange((
@@ -40,6 +61,13 @@ impl ComponentFilter {
         }
     }
 
+    /// Creates a `ComponentFilter` that **includes only** the components with the specified IDs,
+    /// effectively filtering out all other components.
+    ///
+    /// # Arguments
+    ///
+    /// * `ids` - A vector of component IDs to include in the filter. Only components with these IDs
+    ///   will be tracked.
     #[allow(non_snake_case)] // for backwards compatibility
     pub fn Ids(ids: Vec<String>) -> ComponentFilter {
         ComponentFilter { variant: ComponentFilterVariant::Ids(ids) }

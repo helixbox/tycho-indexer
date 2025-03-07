@@ -75,7 +75,8 @@ impl SubstreamsEndpoint {
 
                 Ok(r)
             },
-        );
+        )
+        .accept_compressed(tonic::codec::CompressionEncoding::Gzip);
 
         let response_stream = client.blocks(request).await?;
         let block_stream = response_stream.into_inner();

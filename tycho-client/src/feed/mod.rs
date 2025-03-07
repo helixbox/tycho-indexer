@@ -6,7 +6,7 @@ use futures03::{
     stream::FuturesUnordered,
     StreamExt,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
     select,
     sync::mpsc::{self, Receiver},
@@ -29,7 +29,7 @@ mod block_history;
 pub mod component_tracker;
 pub mod synchronizer;
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Header {
     pub hash: Bytes,
     pub number: u64,
@@ -105,7 +105,7 @@ pub struct BlockSynchronizer<S> {
     max_messages: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum SynchronizerState {
     Started,
@@ -306,7 +306,7 @@ impl SynchronizerStream {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct FeedMessage {
     pub state_msgs: HashMap<String, StateSyncMessage>,
     pub sync_states: HashMap<String, SynchronizerState>,
@@ -579,7 +579,7 @@ mod tests {
             };
 
             let jh = tokio::spawn(async move {
-                _ = end_rx.await;
+                let _ = end_rx.await;
                 SyncResult::Ok(())
             });
 

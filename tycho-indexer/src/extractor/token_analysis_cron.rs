@@ -135,7 +135,7 @@ async fn analyze_batch(
             continue;
         }
 
-        debug!(?t.address, "Analyzing token");
+        info!(?t.address, "Analyzing token");
         let (token_quality, gas, tax) = match analyzer
             .analyze(t.address.clone(), BlockTag::Latest)
             .await
@@ -146,6 +146,8 @@ async fn analyze_batch(
                 continue;
             }
         };
+
+		info!(gas = gas, tax = tax, "Analyze");
 
         match token_quality {
             TokenQuality::Good => {

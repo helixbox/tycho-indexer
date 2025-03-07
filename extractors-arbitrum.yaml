@@ -1,28 +1,28 @@
 extractors:
-  # uniswap_v4:
-  #   name: "uniswap_v4"
-  #   chain: "arbitrum"
-  #   implementation_type: "Custom"
-  #   sync_batch_size: 1000
-  #   start_block: 297842872
-  #   protocol_types:
-  #     - name: "uniswap_v4_pool"
-  #       financial_type: "Swap"
-  #   spkg: "substreams/ethereum-uniswap-v4/arbitrum-uniswap-v4-v0.1.1.spkg"
-  #   module_name: "map_protocol_changes"
-  
-  uniswap_v3:
-    name: "uniswap_v3"
+  uniswap_v4:
+    name: "uniswap_v4"
     chain: "arbitrum"
     implementation_type: "Custom"
     sync_batch_size: 1000
-    start_block: 37418321
+    start_block: 297842872
     protocol_types:
-      - name: "uniswap_v3_pool"
+      - name: "uniswap_v4_pool"
         financial_type: "Swap"
-    spkg: "substreams/ethereum-uniswap-v3/substreams-arbitrum-uniswap-v3-v0.2.1.spkg"
-    module_name: "map_pool_events"
-    post_processor: "add_default_attributes_uniswapv3"
+    spkg: "substreams/ethereum-uniswap-v4/arbitrum-uniswap-v4-v0.1.1.spkg"
+    module_name: "map_protocol_changes"
+  
+  # uniswap_v3:
+  #   name: "uniswap_v3"
+  #   chain: "arbitrum"
+  #   implementation_type: "Custom"
+  #   sync_batch_size: 1000
+  #   start_block: 37418321
+  #   protocol_types:
+  #     - name: "uniswap_v3_pool"
+  #       financial_type: "Swap"
+  #   spkg: "substreams/ethereum-uniswap-v3/substreams-arbitrum-uniswap-v3-v0.2.1.spkg"
+  #   module_name: "map_pool_events"
+  #   post_processor: "add_default_attributes_uniswapv3"
 
   # uniswap_v2:
   #   name: "uniswap_v2"
@@ -35,6 +35,7 @@ extractors:
   #       financial_type: "Swap"
   #   spkg: "substreams/ethereum-uniswap-v2/arbitrum-uniswap-v2-v0.3.2.spkg"
   #   module_name: "map_pool_events"
+  #   post_processor: "add_default_attributes_uniswapv2"
 
   # vm:balancer:
   #   name: "vm:balancer"

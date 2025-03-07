@@ -13,28 +13,28 @@ services:
       - "5431:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-  tycho-indexer:
-    image: ${TYCHO_IMAGE}
-    restart: "no"
-    depends_on:
-      - db
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    environment:
-      SUBSTREAMS_API_TOKEN: readme
-      RPC_URL: readme
-      DATABASE_URL: postgres://postgres:mypassword@db:5432/tycho_indexer_0
-      RUST_LOG: info
-    ports:
-      - "4242:4242"
-    volumes:
-      - ./wait-for-postgres.sh:/usr/wait-for-postgres.sh
-      - ./extractors.yaml:/opt/tycho-indexer/extractors.yaml
-      - ./substreams/:/opt/tycho-indexer/substreams/
-    entrypoint: [ "/usr/wait-for-postgres.sh", "db" ]
-    command: [ "/opt/tycho-indexer/tycho-indexer", "--endpoint", "https://mainnet.eth.streamingfast.io:443", "index"]
+  # tycho-indexer:
+  #   image: ${TYCHO_IMAGE}
+  #   restart: "no"
+  #   depends_on:
+  #     - db
+  #   healthcheck:
+  #     test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   environment:
+  #     SUBSTREAMS_API_TOKEN: readme
+  #     RPC_URL: readme
+  #     DATABASE_URL: postgres://postgres:mypassword@db:5432/tycho_indexer_0
+  #     RUST_LOG: info
+  #   ports:
+  #     - "4242:4242"
+  #   volumes:
+  #     - ./wait-for-postgres.sh:/usr/wait-for-postgres.sh
+  #     - ./extractors.yaml:/opt/tycho-indexer/extractors.yaml
+  #     - ./substreams/:/opt/tycho-indexer/substreams/
+  #   entrypoint: [ "/usr/wait-for-postgres.sh", "db" ]
+  #   command: [ "/opt/tycho-indexer/tycho-indexer", "--endpoint", "https://mainnet.eth.streamingfast.io:443", "index"]
 volumes:
   postgres_data:
